@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BUSY C6</title>
+  <meta name="description" content="Set the time, status or a custom status on a BUSY C6 display, straight from Chrome or Edge.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='9' width='28' height='14' fill='%23000'/%3E%3Crect x='6' y='13' width='20' height='6' fill='%23f00'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono&family=Work+Sans:wght@400;600&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>BUSY C6</h1>
+    <p class="tagline"><span>A status light for your desk, on a Waveshare ESP32-C6 touch display.</span> <span>Plug in the cable. Connect. Set the clock and status.</span></p>
+  </header>
+
+  <main>
+    <div id="noserial" class="banner warn" hidden>
+      This browser can't talk to the board. Open this page in <strong>Chrome</strong> or <strong>Edge</strong> on a computer.
+      You can still try custom statuses in the preview here.
+    </div>
+
+    <section class="card conn">
+      <div class="conn-text">
+        <p id="board-name" class="title">No board connected</p>
+        <span id="board-status" class="chip">Not connected</span>
+      </div>
+      <button id="connect">Connect</button>
+    </section>
+
+    <section class="card heavy">
+      <div class="upload-info">
+        <span id="summary">The board's clock isn't set.</span>
+        <span id="clock-chip" class="chip warn">Lost when unplugged</span>
+      </div>
+      <p id="status" class="status" role="status"></p>
+      <div class="actions">
+        <button id="sync" class="primary" title="Send this computer's time to the board" disabled>Sync clock</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="head"><h2>Status</h2><span class="meta">Or swipe on the board</span></div>
+      <div id="statuses" class="grid"></div>
+    </section>
+
+    <section class="card">
+      <div class="head"><h2>View</h2><span class="meta">Or tap the board</span></div>
+      <div id="views" class="grid"></div>
+    </section>
+
+    <section class="card">
+      <div class="head"><h2>Custom status</h2><span class="meta">Stays on the board</span></div>
+      <div class="custom">
+        <div class="fields">
+          <label class="field"><span class="label">Line 1</span><input type="text" id="line1" value="BACK AT 3" maxlength="24" autocomplete="off"></label>
+          <label class="field"><span class="label">Line 2 (optional)</span><input type="text" id="line2" maxlength="24" autocomplete="off"></label>
+          <div class="colours">
+            <label class="row"><span class="label">Text</span> <input type="color" id="fg" value="#ffffff"></label>
+            <label class="row"><span class="label">Background</span> <input type="color" id="bg" value="#c00000"></label>
+          </div>
+        </div>
+        <div>
+          <canvas id="preview" class="preview" width="720" height="160" aria-label="Preview of the custom status"></canvas>
+          <p id="fit" class="sub"></p>
+          <div class="actions">
+            <button id="send" class="primary" disabled>Send to board</button>
+            <button id="clear" disabled>Clear</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <details class="log">
+      <summary>Activity log</summary>
+      <pre id="log"></pre>
+    </details>
+  </main>
+
+  <footer>
+    <div class="inner">
+      <p class="big">BUSY C6</p>
+      <p class="kicker">Unofficial. Not affiliated with BUSY.</p>
+      <div class="foot-cols">
+        <div>
+          <p class="label">Works on</p>
+          <p>Waveshare ESP32-C6-Touch-LCD-1.9 running this project's <a href="https://github.com/nurnaufal321/busy-c6/tree/main/firmware">firmware</a>, over the USB cable.</p>
+        </div>
+        <div>
+          <p class="label">The clock</p>
+          <p>The board has no clock battery, so it forgets the time when it loses power. Open this page again to set it. It stays in sync while the page is open.</p>
+        </div>
+        <div>
+          <p class="label">Your data</p>
+          <p>Nothing leaves your browser. The page only talks to the board on your USB cable. <a href="https://github.com/nurnaufal321/busy-c6">Source</a>.</p>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="protocol.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

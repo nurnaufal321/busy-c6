@@ -1,11 +1,13 @@
 // BUSY status display for the Waveshare ESP32-C6-Touch-LCD-1.9: the bar's status animations, swipe
 // left and right to change, tap for another way of filling the screen, flips when the board is
 // turned over.
+#include <stdio.h>
 #include <stdlib.h>
 
 
 #include "anim.h"
 #include "board.h"
+#include "clock.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -14,6 +16,7 @@
 #include "i2c_bus.h"
 #include "imu.h"
 #include "lcd.h"
+#include "link.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "touch.h"
@@ -58,6 +61,15 @@ static void save_settings(int status, layout_t layout)
     ESP_LOGI(TAG, "saved status %d, layout %d", status, layout);
 }
 
+/** Tells the page where things stand; ordinary log lines don't start with "BUSY ". */
+static void report(int status, layout_t layout)
+{
+    printf("BUSY names=");
+    for (int i = 0; i < anim_count(); i++) printf("%s%s", i ? "," : "", anim_name(i));
+    printf(" status=%d layout=%d custom=%d time=%d\n", status, layout, anim_has_custom(), clock_is_set());
+    fflush(stdout);
+}
+
 static int pan_at(int64_t now_us)
 {
     int t = (now_us / 1000) % PAN_PERIOD_MS;
@@ -97,6 +109,7 @@ void app_main(void)
     layout_t layout = load_setting(NVS_KEY_LAYOUT, LAYOUT_COUNT);
     anim_select(status, esp_timer_get_time());
     ESP_LOGI(TAG, "%d statuses, showing %s", count, anim_name(status));
+    clock_init();
 
     bool flipped = false;
     int shift = 0;
@@ -126,15 +139,57 @@ void app_main(void)
             shift = t.down ? dx / LCD_PITCH : 0;
             if (t.released && abs(dx) >= SWIPE_MIN_PX) {
                 // Swiping left brings the next status in, as on the S8+.
+                count = anim_count();
                 status = (status + (dx < 0 ? 1 : -1) + count) % count;
                 anim_select(status, now);
                 save_at = now + SAVE_DELAY_US;
                 ESP_LOGI(TAG, "swipe dx=%d -> %s", dx, anim_name(status));
+                report(status, layout);
             } else if (t.tap) {
                 layout = (layout + 1) % LAYOUT_COUNT;
                 save_at = now + SAVE_DELAY_US;
                 ESP_LOGI(TAG, "tap -> layout %d", layout);
+                report(status, layout);
             }
+        }
+
+        link_cmd_t cmd;
+        while (link_poll(&cmd)) {
+            switch (cmd.type) {
+            case LINK_HELLO:
+                break;
+            case LINK_TIME:
+                clock_set(cmd.unix_s, cmd.value);
+                break;
+            case LINK_STATUS:
+                if (cmd.value >= 0 && cmd.value < anim_count()) {
+                    status = cmd.value;
+                    anim_select(status, now);
+                    save_at = now + SAVE_DELAY_US;
+                }
+                break;
+            case LINK_LAYOUT:
+                if (cmd.value >= 0 && cmd.value < LAYOUT_COUNT) {
+                    layout = cmd.value;
+                    save_at = now + SAVE_DELAY_US;
+                }
+                break;
+            case LINK_CUSTOM:
+                anim_set_custom(cmd.pixels);
+                status = anim_count() - 1;
+                anim_select(status, now);
+                save_at = now + SAVE_DELAY_US;
+                break;
+            case LINK_CUSTOM_CLEAR:
+                anim_clear_custom();
+                if (status >= anim_count()) {
+                    status = 0;
+                    anim_select(status, now);
+                    save_at = now + SAVE_DELAY_US;
+                }
+                break;
+            }
+            report(status, layout);
         }
 
         if (save_at && now >= save_at) {
@@ -144,7 +199,9 @@ void app_main(void)
 
         if (now >= next_frame) {
             next_frame = now + FRAME_PERIOD_US;
-            lcd_draw(anim_update(now), shift, layout, pan_at(now));
+            lcd_clock_t row;
+            clock_read(&row);
+            lcd_draw(anim_update(now), shift, layout, pan_at(now), &row);
             if (++frames == 300) {
                 ESP_LOGI(TAG, "%.1f fps", frames * 1e6 / (now - fps_since));
                 fps_since = now;

@@ -10,6 +10,7 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
+#include "font.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -39,6 +40,12 @@
 // Tall: the picture keeps its shape, so it fills the width and these rows of the panel's height.
 #define TALL_PIC_H (LED_H * TALL_W / LED_W)
 #define TALL_PIC_Y ((TALL_H - TALL_PIC_H) / 2)
+// Clock: where the picture's rows start, and the row of text below it.
+#define CLOCK_PIC_TOP 4
+#define CLOCK_TEXT_X 10
+#define CLOCK_TIME_BASELINE 152
+#define CLOCK_DATE1_BASELINE 121
+#define CLOCK_DATE2_BASELINE 152
 // Glow: the picture's position in the grid.
 #define GLOW_X 4
 #define GLOW_Y 13
@@ -68,6 +75,8 @@ static sample_t s_tall_y[TALL_H];
 static uint8_t s_tall_inset[TALL_H];
 // Tall: brightness of each row out of 256; the rows above and below the picture fade out.
 static uint16_t s_tall_fade[TALL_H];
+// Clock: the picture's rows at its own shape.
+static sample_t s_clock_y[TALL_PIC_H];
 // Glow: brightness out of 256 at each distance from the picture.
 static uint16_t s_fade[GLOW_REACH];
 
@@ -152,6 +161,7 @@ static void build_tables(void)
     }
     build_samples(s_tall_x, TALL_W, LED_W);
     build_samples(&s_tall_y[TALL_PIC_Y], TALL_PIC_H, LED_H);
+    build_samples(s_clock_y, TALL_PIC_H, LED_H);
     for (int y = 0; y < TALL_H; y++) {
         int above = TALL_PIC_Y - y;
         int below = y - (TALL_PIC_Y + TALL_PIC_H - 1);
@@ -358,6 +368,78 @@ static void draw_tall(const uint16_t *leds, int shift)
     }
 }
 
+static const glyph_t *find_glyph(const font_t *font, char c)
+{
+    for (int i = 0; i < font->count; i++) {
+        if (font->glyphs[i].c == c) return &font->glyphs[i];
+    }
+    return NULL;
+}
+
+/** Draws white text with its baseline at [y]; returns the pen position after it. */
+static int draw_text(const font_t *font, const char *text, int x, int y, char skip)
+{
+    for (; *text; text++) {
+        const glyph_t *g = find_glyph(font, *text);
+        if (!g) continue;
+        if (*text != skip) {
+            const uint8_t *bits = font->bits + g->offset;
+            for (int gy = 0; gy < g->h; gy++) {
+                int py = y - g->top + gy;
+                if (py < 0 || py >= SCREEN_H) continue;
+                uint16_t *line = s_pixels + py * SCREEN_W;
+                for (int gx = 0; gx < g->w; gx++) {
+                    int px = x + g->left + gx;
+                    uint8_t a = bits[gy * g->w + gx];
+                    if (a == 0 || px < 0 || px >= SCREEN_W) continue;
+                    uint16_t c = (uint16_t)((a >> 3) << 11 | (a >> 2) << 5 | a >> 3);
+                    line[px] = to_panel(c);
+                }
+            }
+        }
+        x += g->advance;
+    }
+    return x;
+}
+
+static int text_width(const font_t *font, const char *text)
+{
+    int w = 0;
+    for (; *text; text++) {
+        const glyph_t *g = find_glyph(font, *text);
+        if (g) w += g->advance;
+    }
+    return w;
+}
+
+/** The picture at its own shape at the top, with the date and time below. */
+static void draw_clock(const uint16_t *leds, int shift, const lcd_clock_t *clock)
+{
+    memset(s_pixels, 0, SCREEN_BYTES);
+    int margin_x = (SCREEN_W - TALL_W * TALL_PITCH + 1) / 2;
+    int drag = shift * TALL_W / LED_W;
+    for (int gy = 0; gy < TALL_PIC_H; gy++) {
+        const sample_t *sy = &s_clock_y[gy];
+        uint16_t *line = s_pixels + SCREEN_W * (CLOCK_PIC_TOP + gy * TALL_PITCH);
+        for (int dot = 0; dot < TALL_W; dot++) {
+            int src = dot - drag;
+            if (src < 0 || src >= TALL_W) continue;
+            const sample_t *sx = &s_tall_x[src];
+            uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
+            uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
+            uint16_t c = to_panel(blend(top, bottom, sy->weight));
+            uint16_t *px = line + margin_x + dot * TALL_PITCH;
+            px[0] = c;
+            px[1] = c;
+        }
+        memcpy(line + SCREEN_W, line, SCREEN_W * 2);
+    }
+    draw_text(&font_date, clock->day, CLOCK_TEXT_X, CLOCK_DATE1_BASELINE, 0);
+    draw_text(&font_date, clock->date, CLOCK_TEXT_X, CLOCK_DATE2_BASELINE, 0);
+    int time_x = SCREEN_W - CLOCK_TEXT_X - text_width(&font_time, clock->time);
+    draw_text(&font_time, clock->time, time_x, CLOCK_TIME_BASELINE, clock->colon ? 0 : ':');
+}
+
 static void draw_glow(const uint16_t *leds, int shift)
 {
     uint16_t *out = s_pixels;
@@ -384,13 +466,15 @@ static void draw_glow(const uint16_t *leds, int shift)
     }
 }
 
-void lcd_draw(const uint16_t *leds, int shift, layout_t layout, int pan)
+void lcd_draw(const uint16_t *leds, int shift, layout_t layout, int pan, const lcd_clock_t *clock)
 {
     xSemaphoreTake(s_done, portMAX_DELAY);
     if (layout == LAYOUT_GLOW) {
         draw_glow(leds, shift);
     } else if (layout == LAYOUT_TALL) {
         draw_tall(leds, shift);
+    } else if (layout == LAYOUT_CLOCK) {
+        draw_clock(leds, shift, clock);
     } else {
         draw_cells(leds, shift, layout, pan);
     }

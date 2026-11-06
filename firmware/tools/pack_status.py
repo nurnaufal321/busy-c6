@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds status.pack, the 13 BUSY status animations for the ESP32-C6 display, from vendor/.
+"""Builds status.pack, the 13 BUSY status animations for the ESP32-C6 display, from assets/.
 
 Format (little endian):
 
@@ -29,9 +29,9 @@ import zipfile
 import zlib
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-ASSETS = ROOT / "vendor" / "apps_assets"
-OUT = Path(__file__).resolve().parents[1] / "pack" / "status.pack"
+ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "assets"
+OUT = ROOT / "pack" / "status.pack"
 W, H = 72, 16
 PIXELS = W * H
 # The flash partition for the pack; see partitions.csv.
@@ -166,11 +166,11 @@ def frames_of(path: Path) -> tuple[int, list[list[int]]]:
 
 def statuses() -> list[tuple[str, Path]]:
     found = []
-    for d in (ASSETS / "busy" / "themes").iterdir():
+    for d in (ASSETS / "themes").iterdir():
         if d.is_dir():
             found.append((json.loads((d / "theme.json").read_text())["order"], d.name))
-    themes = [(n, ASSETS / "shared" / "animations" / f"{n}_72x16.zip") for _, n in sorted(found)]
-    return [("busy", ASSETS / "busy" / "animations" / "indicator_busy_72x16.zip")] + themes
+    themes = [(n, ASSETS / "animations" / f"{n}_72x16.zip") for _, n in sorted(found)]
+    return [("busy", ASSETS / "animations" / "indicator_busy_72x16.zip")] + themes
 
 
 def pack_one(frames: list[list[int]]) -> bytes:

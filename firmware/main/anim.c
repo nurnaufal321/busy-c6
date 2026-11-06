@@ -4,10 +4,13 @@
 
 #include "esp_log.h"
 #include "esp_partition.h"
+#include "nvs.h"
 
 // See tools/pack_status.py for the format.
 #define NAME_LEN 24
 #define SUBTYPE_STATUS 0x40
+#define NVS_NS "status"
+#define NVS_KEY_CUSTOM "custom"
 
 typedef struct __attribute__((packed)) {
     char name[NAME_LEN];
@@ -22,7 +25,10 @@ static const uint8_t *s_pack;
 static const entry_t *s_entries;
 static int s_count;
 
-static const entry_t *s_cur;
+static uint16_t s_custom[LED_PIXELS];
+static bool s_has_custom;
+
+static const entry_t *s_cur;  // NULL while showing the custom status
 static const uint8_t *s_pos;
 static uint16_t s_buf[LED_PIXELS];
 static int s_frame;  // the frame in s_buf, -1 before the first
@@ -42,16 +48,59 @@ int anim_init(void)
     }
     memcpy(&s_count, s_pack + 4, sizeof(s_count));
     s_entries = (const entry_t *)(s_pack + 8);
-    return s_count;
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        size_t len = sizeof(s_custom);
+        s_has_custom = nvs_get_blob(h, NVS_KEY_CUSTOM, s_custom, &len) == ESP_OK && len == sizeof(s_custom);
+        nvs_close(h);
+    }
+    return anim_count();
+}
+
+int anim_count(void)
+{
+    return s_count + (s_has_custom ? 1 : 0);
+}
+
+bool anim_has_custom(void)
+{
+    return s_has_custom;
+}
+
+void anim_set_custom(const uint16_t *pixels)
+{
+    memcpy(s_custom, pixels, sizeof(s_custom));
+    s_has_custom = true;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_blob(h, NVS_KEY_CUSTOM, s_custom, sizeof(s_custom));
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+void anim_clear_custom(void)
+{
+    s_has_custom = false;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_erase_key(h, NVS_KEY_CUSTOM);
+    nvs_commit(h);
+    nvs_close(h);
 }
 
 const char *anim_name(int status)
 {
-    return s_entries[status].name;
+    return status < s_count ? s_entries[status].name : "custom";
 }
 
 void anim_select(int status, int64_t now_us)
 {
+    if (status >= s_count) {
+        s_cur = NULL;
+        memcpy(s_buf, s_custom, sizeof(s_buf));
+        return;
+    }
     s_cur = &s_entries[status];
     s_frame = -1;
     s_start_us = now_us;
@@ -87,6 +136,7 @@ static void decode_frame(void)
 
 const uint16_t *anim_update(int64_t now_us)
 {
+    if (!s_cur) return s_buf;
     int64_t due = (now_us - s_start_us) * s_cur->fps / 1000000;
     if (due >= s_cur->frames) {
         // Loop: start again from black, keeping the time left over.
