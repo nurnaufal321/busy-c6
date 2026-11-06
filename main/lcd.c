@@ -27,12 +27,15 @@
 // Tall and Glow: a full-screen grid of even 4 px dots.
 #define DOTS_W 80
 #define DOTS_H 42
-// Tall: the black border around the picture, in dots.
-#define TALL_BORDER 2
-#define TALL_W (DOTS_W - 2 * TALL_BORDER)
-#define TALL_H (DOTS_H - 2 * TALL_BORDER)
-// Tall: the corner radius, in dots.
-#define TALL_RADIUS 7
+// Tall: its own finer grid of 3 px dots (2 lit, 1 dark), the black border around the picture and
+// the corner radius, in dots.
+#define TALL_PITCH 3
+#define TALL_GRID_W (SCREEN_W / TALL_PITCH)
+#define TALL_GRID_H (SCREEN_H / TALL_PITCH)
+#define TALL_BORDER 3
+#define TALL_W (TALL_GRID_W - 2 * TALL_BORDER)
+#define TALL_H (TALL_GRID_H - 2 * TALL_BORDER)
+#define TALL_RADIUS 13
 // Glow: the picture's position in the grid.
 #define GLOW_X 4
 #define GLOW_Y 13
@@ -309,32 +312,29 @@ static uint16_t *finish_dot_row(uint16_t *first)
     return out + SCREEN_W;
 }
 
-/** The picture resampled onto even dots, inside a black border. */
+/** The picture resampled onto fine, even dots, inside a black border with round corners. */
 static void draw_tall(const uint16_t *leds, int shift)
 {
-    // 42 dots of 4 px leave one dark line above and below; the border's rows stay black too.
     memset(s_pixels, 0, SCREEN_BYTES);
-    uint16_t *out = s_pixels + SCREEN_W * (1 + TALL_BORDER * 4);
+    int margin_x = (SCREEN_W - TALL_GRID_W * TALL_PITCH + 1) / 2;
+    int margin_y = (SCREEN_H - TALL_GRID_H * TALL_PITCH + 1) / 2;
     int drag = shift * TALL_W / LED_W;
     for (int gy = 0; gy < TALL_H; gy++) {
         const sample_t *sy = &s_tall_y[gy];
-        uint16_t *first = out;
-        for (int gx = 0; gx < DOTS_W; gx++) {
-            int dot = gx - TALL_BORDER - drag;
-            uint16_t c = 0;
-            int inset = TALL_BORDER + s_tall_inset[gy];
-            if (gx >= inset && gx < DOTS_W - inset && dot >= 0 && dot < TALL_W) {
-                const sample_t *sx = &s_tall_x[dot];
-                uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
-                uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
-                c = to_panel(blend(top, bottom, sy->weight));
-            }
-            *out++ = c;
-            *out++ = c;
-            *out++ = c;
-            *out++ = 0;
+        uint16_t *line = s_pixels + SCREEN_W * (margin_y + (TALL_BORDER + gy) * TALL_PITCH);
+        int inset = s_tall_inset[gy];
+        for (int dot = inset; dot < TALL_W - inset; dot++) {
+            int src = dot - drag;
+            if (src < 0 || src >= TALL_W) continue;
+            const sample_t *sx = &s_tall_x[src];
+            uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
+            uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
+            uint16_t c = to_panel(blend(top, bottom, sy->weight));
+            uint16_t *px = line + margin_x + (TALL_BORDER + dot) * TALL_PITCH;
+            px[0] = c;
+            px[1] = c;
         }
-        out = finish_dot_row(first);
+        memcpy(line + SCREEN_W, line, SCREEN_W * 2);
     }
 }
 
