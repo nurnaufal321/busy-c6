@@ -78,8 +78,6 @@ static sample_t s_tall_y[TALL_H];
 static uint8_t s_tall_inset[TALL_H];
 // Tall: brightness of each row out of 256; the rows above and below the picture fade out.
 static uint16_t s_tall_fade[TALL_H];
-// Clock: the picture's rows at its own shape.
-static sample_t s_clock_y[TALL_PIC_H];
 // Glow: brightness out of 256 at each distance from the picture.
 static uint16_t s_fade[GLOW_REACH];
 
@@ -164,7 +162,6 @@ static void build_tables(void)
     }
     build_samples(s_tall_x, TALL_W, LED_W);
     build_samples(&s_tall_y[TALL_PIC_Y], TALL_PIC_H, LED_H);
-    build_samples(s_clock_y, TALL_PIC_H, LED_H);
     for (int y = 0; y < TALL_H; y++) {
         int above = TALL_PIC_Y - y;
         int below = y - (TALL_PIC_Y + TALL_PIC_H - 1);
@@ -416,27 +413,24 @@ static int text_width(const font_t *font, const char *text)
     return w;
 }
 
-/** The picture at its own shape at the top, with the date and time below. */
+/** The picture exactly as in Original, moved to the top, with the date and time below. */
 static void draw_clock(const uint16_t *leds, int shift, const lcd_clock_t *clock)
 {
     memset(s_pixels, 0, SCREEN_BYTES);
-    int margin_x = (SCREEN_W - TALL_W * TALL_PITCH + 1) / 2;
-    int drag = shift * TALL_W / LED_W;
-    for (int gy = 0; gy < TALL_PIC_H; gy++) {
-        const sample_t *sy = &s_clock_y[gy];
-        uint16_t *line = s_pixels + SCREEN_W * (CLOCK_PIC_TOP + gy * TALL_PITCH);
-        for (int dot = 0; dot < TALL_W; dot++) {
-            int src = dot - drag;
-            if (src < 0 || src >= TALL_W) continue;
-            const sample_t *sx = &s_tall_x[src];
-            uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
-            uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
-            uint16_t c = to_panel(blend(top, bottom, sy->weight));
-            uint16_t *px = line + margin_x + dot * TALL_PITCH;
+    for (int row = 0; row < LED_H; row++) {
+        uint16_t *line = s_pixels + SCREEN_W * (CLOCK_PIC_TOP + row * 4);
+        for (int col = 0; col < LED_W; col++) {
+            int src = col - shift;
+            if (src < 0 || src >= LED_W) continue;
+            uint16_t c = to_panel(leds[row * LED_W + src]);
+            uint16_t *px = line + PIC_X + col * 4;
             px[0] = c;
             px[1] = c;
+            px[2] = c;
         }
+        // 3 lit lines, 1 dark.
         memcpy(line + SCREEN_W, line, SCREEN_W * 2);
+        memcpy(line + 2 * SCREEN_W, line, SCREEN_W * 2);
     }
     draw_text(&font_date, clock->day, CLOCK_TEXT_X, CLOCK_DATE1_BASELINE, 0);
     draw_text(&font_date, clock->date, CLOCK_TEXT_X, CLOCK_DATE2_BASELINE, 0);
