@@ -36,6 +36,9 @@
 #define TALL_W (TALL_GRID_W - 2 * TALL_BORDER)
 #define TALL_H (TALL_GRID_H - 2 * TALL_BORDER)
 #define TALL_RADIUS 13
+// Tall: the picture keeps its shape, so it fills the width and these rows of the panel's height.
+#define TALL_PIC_H (LED_H * TALL_W / LED_W)
+#define TALL_PIC_Y ((TALL_H - TALL_PIC_H) / 2)
 // Glow: the picture's position in the grid.
 #define GLOW_X 4
 #define GLOW_Y 13
@@ -63,6 +66,8 @@ static sample_t s_tall_x[TALL_W];
 static sample_t s_tall_y[TALL_H];
 // Tall: dots left dark at each end of a row, which rounds the corners.
 static uint8_t s_tall_inset[TALL_H];
+// Tall: brightness of each row out of 256; the rows above and below the picture fade out.
+static uint16_t s_tall_fade[TALL_H];
 // Glow: brightness out of 256 at each distance from the picture.
 static uint16_t s_fade[GLOW_REACH];
 
@@ -146,7 +151,16 @@ static void build_tables(void)
         for (int i = 0; i < 3; i++) s_rows[LAYOUT_ORIGINAL][PIC_Y + led * 4 + i] = led;
     }
     build_samples(s_tall_x, TALL_W, LED_W);
-    build_samples(s_tall_y, TALL_H, LED_H);
+    build_samples(&s_tall_y[TALL_PIC_Y], TALL_PIC_H, LED_H);
+    for (int y = 0; y < TALL_H; y++) {
+        int above = TALL_PIC_Y - y;
+        int below = y - (TALL_PIC_Y + TALL_PIC_H - 1);
+        int d = above > 0 ? above : below > 0 ? below : 0;
+        s_tall_fade[y] = d == 0 ? 256 : 141 * (TALL_PIC_Y + 1 - d) / (TALL_PIC_Y + 1);
+        // The rows outside the picture repeat its nearest edge.
+        if (above > 0) s_tall_y[y] = (sample_t){.a = 0, .b = 0, .weight = 0};
+        if (below > 0) s_tall_y[y] = (sample_t){.a = LED_H - 1, .b = LED_H - 1, .weight = 0};
+    }
     for (int i = 0; i < TALL_RADIUS; i++) {
         float dy = TALL_RADIUS - i - 0.5f;
         int inset = (int)(TALL_RADIUS - sqrtf(TALL_RADIUS * TALL_RADIUS - dy * dy) + 0.5f);
@@ -312,7 +326,10 @@ static uint16_t *finish_dot_row(uint16_t *first)
     return out + SCREEN_W;
 }
 
-/** The picture resampled onto fine, even dots, inside a black border with round corners. */
+/**
+ * The picture resampled onto fine, even dots at its own shape, with the rest of the height glowing
+ * from its edge colours, inside a black border with round corners.
+ */
 static void draw_tall(const uint16_t *leds, int shift)
 {
     memset(s_pixels, 0, SCREEN_BYTES);
@@ -323,13 +340,16 @@ static void draw_tall(const uint16_t *leds, int shift)
         const sample_t *sy = &s_tall_y[gy];
         uint16_t *line = s_pixels + SCREEN_W * (margin_y + (TALL_BORDER + gy) * TALL_PITCH);
         int inset = s_tall_inset[gy];
+        uint32_t fade = s_tall_fade[gy];
         for (int dot = inset; dot < TALL_W - inset; dot++) {
             int src = dot - drag;
             if (src < 0 || src >= TALL_W) continue;
             const sample_t *sx = &s_tall_x[src];
             uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
             uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
-            uint16_t c = to_panel(blend(top, bottom, sy->weight));
+            uint16_t c = blend(top, bottom, sy->weight);
+            if (fade != 256) c = dim(c, fade);
+            c = to_panel(c);
             uint16_t *px = line + margin_x + (TALL_BORDER + dot) * TALL_PITCH;
             px[0] = c;
             px[1] = c;
