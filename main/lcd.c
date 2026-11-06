@@ -26,6 +26,10 @@
 // Tall and Glow: a full-screen grid of even 4 px dots.
 #define DOTS_W 80
 #define DOTS_H 42
+// Tall: the black border around the picture, in dots.
+#define TALL_BORDER 2
+#define TALL_W (DOTS_W - 2 * TALL_BORDER)
+#define TALL_H (DOTS_H - 2 * TALL_BORDER)
 // Glow: the picture's position in the grid.
 #define GLOW_X 4
 #define GLOW_Y 13
@@ -49,8 +53,8 @@ typedef struct {
     uint8_t a, b;
     uint16_t weight;
 } sample_t;
-static sample_t s_tall_x[DOTS_W];
-static sample_t s_tall_y[DOTS_H];
+static sample_t s_tall_x[TALL_W];
+static sample_t s_tall_y[TALL_H];
 // Glow: brightness out of 256 at each distance from the picture.
 static uint16_t s_fade[GLOW_REACH];
 
@@ -133,8 +137,8 @@ static void build_tables(void)
     for (int led = 0; led < LED_H; led++) {
         for (int i = 0; i < 3; i++) s_rows[LAYOUT_ORIGINAL][PIC_Y + led * 4 + i] = led;
     }
-    build_samples(s_tall_x, DOTS_W, LED_W);
-    build_samples(s_tall_y, DOTS_H, LED_H);
+    build_samples(s_tall_x, TALL_W, LED_W);
+    build_samples(s_tall_y, TALL_H, LED_H);
     stretch(s_rows[LAYOUT_PAN], SCREEN_H, LED_H);
     for (int d = 0; d < GLOW_REACH; d++) s_fade[d] = d == 0 ? 256 : 141 * (GLOW_REACH - d) / GLOW_REACH;
 }
@@ -294,21 +298,20 @@ static uint16_t *finish_dot_row(uint16_t *first)
     return out + SCREEN_W;
 }
 
-/** The picture resampled onto even dots that fill the screen. */
+/** The picture resampled onto even dots, inside a black border. */
 static void draw_tall(const uint16_t *leds, int shift)
 {
-    uint16_t *out = s_pixels;
-    // 42 dots of 4 px leave one dark line above and below.
-    memset(out, 0, SCREEN_W * 2);
-    out += SCREEN_W;
-    int drag = shift * DOTS_W / LED_W;
-    for (int gy = 0; gy < DOTS_H; gy++) {
+    // 42 dots of 4 px leave one dark line above and below; the border's rows stay black too.
+    memset(s_pixels, 0, SCREEN_BYTES);
+    uint16_t *out = s_pixels + SCREEN_W * (1 + TALL_BORDER * 4);
+    int drag = shift * TALL_W / LED_W;
+    for (int gy = 0; gy < TALL_H; gy++) {
         const sample_t *sy = &s_tall_y[gy];
         uint16_t *first = out;
         for (int gx = 0; gx < DOTS_W; gx++) {
-            int dot = gx - drag;
+            int dot = gx - TALL_BORDER - drag;
             uint16_t c = 0;
-            if (dot >= 0 && dot < DOTS_W) {
+            if (gx >= TALL_BORDER && gx < DOTS_W - TALL_BORDER && dot >= 0 && dot < TALL_W) {
                 const sample_t *sx = &s_tall_x[dot];
                 uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
                 uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
