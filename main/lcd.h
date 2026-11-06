@@ -8,7 +8,7 @@
 /** How the 72x16 picture fills the 320x170 screen. A tap steps through these. */
 typedef enum {
     LAYOUT_ORIGINAL,  // 4 px LEDs, centred, black bars
-    LAYOUT_TALL,      // stretched over the whole screen
+    LAYOUT_TALL,      // resampled onto even 4 px dots over the whole screen
     LAYOUT_PAN,       // 10 px LEDs, the view sliding across the picture
     LAYOUT_GLOW,      // 4 px LEDs, the edge colours fading out into the bars
     LAYOUT_COUNT,

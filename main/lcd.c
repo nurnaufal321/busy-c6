@@ -23,9 +23,10 @@
 #define PIC_Y ((SCREEN_H - LED_H * 4) / 2)
 // Pan: LED pitch.
 #define PAN_PITCH 10
-// Glow: the grid of 4 px LEDs, and the picture's position in it.
-#define GLOW_W 80
-#define GLOW_H 42
+// Tall and Glow: a full-screen grid of even 4 px dots.
+#define DOTS_W 80
+#define DOTS_H 42
+// Glow: the picture's position in the grid.
 #define GLOW_X 4
 #define GLOW_Y 13
 #define GLOW_REACH 14
@@ -42,6 +43,14 @@ static uint16_t *s_pixels;
 // The LED each screen column and row shows, or -1 for a dark gap.
 static int8_t s_cols[LAYOUT_COUNT][SCREEN_W];
 static int8_t s_rows[LAYOUT_COUNT][SCREEN_H];
+// Tall: where each dot samples the picture: the two nearest LEDs and the weight of the second, out
+// of 256.
+typedef struct {
+    uint8_t a, b;
+    uint16_t weight;
+} sample_t;
+static sample_t s_tall_x[DOTS_W];
+static sample_t s_tall_y[DOTS_H];
 // Glow: brightness out of 256 at each distance from the picture.
 static uint16_t s_fade[GLOW_REACH];
 
@@ -97,6 +106,23 @@ static void stretch(int8_t *table, int size, int leds)
     }
 }
 
+/**
+ * Samples for [dots] dots across [leds] LEDs. The blend is a smoothstep rather than a straight
+ * line, so edges in the picture stay crisp instead of going soft.
+ */
+static void build_samples(sample_t *table, int dots, int leds)
+{
+    for (int i = 0; i < dots; i++) {
+        float pos = (i + 0.5f) * leds / dots - 0.5f;
+        if (pos < 0) pos = 0;
+        int a = (int)pos;
+        int b = a + 1 < leds ? a + 1 : a;
+        float t = pos - a;
+        t = t * t * (3 - 2 * t);
+        table[i] = (sample_t){.a = a, .b = b, .weight = (uint16_t)(t * 256)};
+    }
+}
+
 static void build_tables(void)
 {
     memset(s_cols, -1, sizeof(s_cols));
@@ -107,8 +133,8 @@ static void build_tables(void)
     for (int led = 0; led < LED_H; led++) {
         for (int i = 0; i < 3; i++) s_rows[LAYOUT_ORIGINAL][PIC_Y + led * 4 + i] = led;
     }
-    stretch(s_cols[LAYOUT_TALL], SCREEN_W, LED_W);
-    stretch(s_rows[LAYOUT_TALL], SCREEN_H, LED_H);
+    build_samples(s_tall_x, DOTS_W, LED_W);
+    build_samples(s_tall_y, DOTS_H, LED_H);
     stretch(s_rows[LAYOUT_PAN], SCREEN_H, LED_H);
     for (int d = 0; d < GLOW_REACH; d++) s_fade[d] = d == 0 ? 256 : 141 * (GLOW_REACH - d) / GLOW_REACH;
 }
@@ -239,18 +265,76 @@ static inline int clamp(int v, int max)
     return v < 0 ? 0 : v > max ? max : v;
 }
 
+/** The picture's LED at [x], [y], with black beyond the sides while a swipe drags it. */
+static inline uint16_t led_at(const uint16_t *leds, int x, int y)
+{
+    return x >= 0 && x < LED_W ? leds[y * LED_W + x] : 0;
+}
+
+/** Blends two RGB565 colours; [w] out of 256 is the share of the second. */
+static inline uint16_t blend(uint16_t c0, uint16_t c1, uint32_t w)
+{
+    if (c0 == c1) return c0;
+    uint32_t v = 256 - w;
+    uint32_t r = ((c0 >> 11) * v + (c1 >> 11) * w) >> 8;
+    uint32_t g = (((c0 >> 5) & 0x3F) * v + ((c1 >> 5) & 0x3F) * w) >> 8;
+    uint32_t b = ((c0 & 0x1F) * v + (c1 & 0x1F) * w) >> 8;
+    return (uint16_t)(r << 11 | g << 5 | b);
+}
+
+/** A row of dots is 3 lit lines and a dark one; [first] holds the first line already. */
+static uint16_t *finish_dot_row(uint16_t *first)
+{
+    uint16_t *out = first + SCREEN_W;
+    memcpy(out, first, SCREEN_W * 2);
+    out += SCREEN_W;
+    memcpy(out, first, SCREEN_W * 2);
+    out += SCREEN_W;
+    memset(out, 0, SCREEN_W * 2);
+    return out + SCREEN_W;
+}
+
+/** The picture resampled onto even dots that fill the screen. */
+static void draw_tall(const uint16_t *leds, int shift)
+{
+    uint16_t *out = s_pixels;
+    // 42 dots of 4 px leave one dark line above and below.
+    memset(out, 0, SCREEN_W * 2);
+    out += SCREEN_W;
+    int drag = shift * DOTS_W / LED_W;
+    for (int gy = 0; gy < DOTS_H; gy++) {
+        const sample_t *sy = &s_tall_y[gy];
+        uint16_t *first = out;
+        for (int gx = 0; gx < DOTS_W; gx++) {
+            int dot = gx - drag;
+            uint16_t c = 0;
+            if (dot >= 0 && dot < DOTS_W) {
+                const sample_t *sx = &s_tall_x[dot];
+                uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
+                uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
+                c = to_panel(blend(top, bottom, sy->weight));
+            }
+            *out++ = c;
+            *out++ = c;
+            *out++ = c;
+            *out++ = 0;
+        }
+        out = finish_dot_row(first);
+    }
+}
+
 static void draw_glow(const uint16_t *leds, int shift)
 {
     uint16_t *out = s_pixels;
-    // 42 LEDs of 4 px leave one dark line above and below.
+    // 42 dots of 4 px leave one dark line above and below.
     memset(out, 0, SCREEN_W * 2);
     out += SCREEN_W;
-    for (int gy = 0; gy < GLOW_H; gy++) {
+    for (int gy = 0; gy < DOTS_H; gy++) {
         uint16_t *first = out;
         int py = gy - GLOW_Y;
         int dy = py < 0 ? -py : py >= LED_H ? py - (LED_H - 1) : 0;
         const uint16_t *line = &leds[clamp(py, LED_H - 1) * LED_W];
-        for (int gx = 0; gx < GLOW_W; gx++) {
+        for (int gx = 0; gx < DOTS_W; gx++) {
             int px = gx - GLOW_X - shift;
             int dx = px < 0 ? -px : px >= LED_W ? px - (LED_W - 1) : 0;
             int d = dx > dy ? dx : dy;
@@ -261,12 +345,7 @@ static void draw_glow(const uint16_t *leds, int shift)
             *out++ = c;
             *out++ = 0;
         }
-        memcpy(out, first, SCREEN_W * 2);
-        out += SCREEN_W;
-        memcpy(out, first, SCREEN_W * 2);
-        out += SCREEN_W;
-        memset(out, 0, SCREEN_W * 2);
-        out += SCREEN_W;
+        out = finish_dot_row(first);
     }
 }
 
@@ -275,6 +354,8 @@ void lcd_draw(const uint16_t *leds, int shift, layout_t layout, int pan)
     xSemaphoreTake(s_done, portMAX_DELAY);
     if (layout == LAYOUT_GLOW) {
         draw_glow(leds, shift);
+    } else if (layout == LAYOUT_TALL) {
+        draw_tall(leds, shift);
     } else {
         draw_cells(leds, shift, layout, pan);
     }

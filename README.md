@@ -6,7 +6,8 @@ It has no Wi-Fi, Bluetooth, timer or clock.
 - **Swipe left / right:** next / previous status, wrapping.
 - **Tap:** the next way of filling the screen, in this order:
   - **Original:** 4 px LEDs in the middle of the screen, with black bars.
-  - **Tall:** the picture stretched over the whole screen, with tall LEDs.
+  - **Tall:** the picture smoothly resampled onto an 80×42 grid of even 4 px dots, filling the
+    screen.
   - **Pan:** 10 px LEDs filling the height, the view sliding slowly across the picture.
   - **Glow:** the original picture, with its edge colours fading out into the bars.
 - **Turn the board over:** the picture flips, and left stays left.
