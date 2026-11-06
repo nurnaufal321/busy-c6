@@ -24,8 +24,9 @@
 #define SPI_HZ (40 * 1000 * 1000)
 #define BACKLIGHT_PERCENT 60
 
+// Rotating 180 degrees reverses both directions: MX|MV|ML, then MY|MV.
 #define MADCTL_LANDSCAPE 0x70
-#define MADCTL_FLIPPED 0x20
+#define MADCTL_FLIPPED 0xA0
 
 static esp_lcd_panel_io_handle_t s_io;
 static SemaphoreHandle_t s_done;
