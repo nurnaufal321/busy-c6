@@ -43,6 +43,9 @@
 // Clock: where the picture's rows start, and the row of text below it.
 #define CLOCK_PIC_TOP 4
 #define CLOCK_TEXT_X 10
+// The status's dots light 4 pixels in every 9, so solid text this bright (out of 256) gives off
+// about the same light.
+#define CLOCK_TEXT_LEVEL 178
 #define CLOCK_TIME_BASELINE 152
 #define CLOCK_DATE1_BASELINE 121
 #define CLOCK_DATE2_BASELINE 152
@@ -392,7 +395,8 @@ static int draw_text(const font_t *font, const char *text, int x, int y, char sk
                     int px = x + g->left + gx;
                     uint8_t a = bits[gy * g->w + gx];
                     if (a == 0 || px < 0 || px >= SCREEN_W) continue;
-                    uint16_t c = (uint16_t)((a >> 3) << 11 | (a >> 2) << 5 | a >> 3);
+                    uint32_t v = a * CLOCK_TEXT_LEVEL >> 8;
+                    uint16_t c = (uint16_t)((v >> 3) << 11 | (v >> 2) << 5 | v >> 3);
                     line[px] = to_panel(c);
                 }
             }
