@@ -1,5 +1,6 @@
 #include "lcd.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "board.h"
@@ -30,6 +31,8 @@
 #define TALL_BORDER 2
 #define TALL_W (DOTS_W - 2 * TALL_BORDER)
 #define TALL_H (DOTS_H - 2 * TALL_BORDER)
+// Tall: the corner radius, in dots.
+#define TALL_RADIUS 7
 // Glow: the picture's position in the grid.
 #define GLOW_X 4
 #define GLOW_Y 13
@@ -55,6 +58,8 @@ typedef struct {
 } sample_t;
 static sample_t s_tall_x[TALL_W];
 static sample_t s_tall_y[TALL_H];
+// Tall: dots left dark at each end of a row, which rounds the corners.
+static uint8_t s_tall_inset[TALL_H];
 // Glow: brightness out of 256 at each distance from the picture.
 static uint16_t s_fade[GLOW_REACH];
 
@@ -139,6 +144,12 @@ static void build_tables(void)
     }
     build_samples(s_tall_x, TALL_W, LED_W);
     build_samples(s_tall_y, TALL_H, LED_H);
+    for (int i = 0; i < TALL_RADIUS; i++) {
+        float dy = TALL_RADIUS - i - 0.5f;
+        int inset = (int)(TALL_RADIUS - sqrtf(TALL_RADIUS * TALL_RADIUS - dy * dy) + 0.5f);
+        s_tall_inset[i] = inset;
+        s_tall_inset[TALL_H - 1 - i] = inset;
+    }
     stretch(s_rows[LAYOUT_PAN], SCREEN_H, LED_H);
     for (int d = 0; d < GLOW_REACH; d++) s_fade[d] = d == 0 ? 256 : 141 * (GLOW_REACH - d) / GLOW_REACH;
 }
@@ -311,7 +322,8 @@ static void draw_tall(const uint16_t *leds, int shift)
         for (int gx = 0; gx < DOTS_W; gx++) {
             int dot = gx - TALL_BORDER - drag;
             uint16_t c = 0;
-            if (gx >= TALL_BORDER && gx < DOTS_W - TALL_BORDER && dot >= 0 && dot < TALL_W) {
+            int inset = TALL_BORDER + s_tall_inset[gy];
+            if (gx >= inset && gx < DOTS_W - inset && dot >= 0 && dot < TALL_W) {
                 const sample_t *sx = &s_tall_x[dot];
                 uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
                 uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
