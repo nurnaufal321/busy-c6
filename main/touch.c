@@ -1,18 +1,27 @@
 #include "touch.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "board.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "i2c_bus.h"
+
+// A touch moving further or lasting longer than this isn't a tap.
+#define TAP_MOVE_PX 15
+#define TAP_US (600 * 1000)
 
 static const char *TAG = "touch";
 static i2c_master_dev_handle_t s_dev;
 static bool s_down;
 static int s_start;
 static int s_last;
+static int s_start_x;
+static int s_moved;
+static int64_t s_down_us;
 
 void touch_init(void)
 {
@@ -38,12 +47,22 @@ touch_state_t touch_poll(void)
         return st;
     }
     bool down = d[2] != 0;
+    int x = (d[3] & 0x0F) << 8 | d[4];
     int y = (d[5] & 0x0F) << 8 | d[6];  // the panel's y runs along the long side
     if (down) {
-        if (!s_down) s_start = y;
+        if (!s_down) {
+            s_start = y;
+            s_start_x = x;
+            s_moved = 0;
+            s_down_us = esp_timer_get_time();
+        }
         s_last = y;
+        int dx = abs(x - s_start_x), dy = abs(y - s_start);
+        int moved = dx > dy ? dx : dy;
+        if (moved > s_moved) s_moved = moved;
     } else if (s_down) {
         st.released = true;
+        st.tap = s_moved < TAP_MOVE_PX && esp_timer_get_time() - s_down_us < TAP_US;
     }
     s_down = down;
     st.down = down;

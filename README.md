@@ -3,12 +3,16 @@
 Standalone firmware that shows the BUSY Bar's 13 status animations on the 1.9-inch touch board.
 It has no Wi-Fi, Bluetooth, timer or clock.
 
-- **Swipe left / right:** next / previous status, wrapping. It remembers the last one after
-  power-off.
+- **Swipe left / right:** next / previous status, wrapping.
+- **Tap:** the next way of filling the screen, in this order:
+  - **Original:** 4 px LEDs in the middle of the screen, with black bars.
+  - **Tall:** the picture stretched over the whole screen, with tall LEDs.
+  - **Pan:** 10 px LEDs filling the height, the view sliding slowly across the picture.
+  - **Glow:** the original picture, with its edge colours fading out into the bars.
 - **Turn the board over:** the picture flips, and left stays left.
 
-The picture is the bar's 72×16 display, drawn at 4 px per LED (288×64) in the middle of the
-320×170 screen.
+It remembers the last status and layout after power-off. The picture is the bar's 72×16 display
+on the 320×170 screen.
 
 ## Build and flash
 

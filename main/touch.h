@@ -7,6 +7,8 @@ typedef struct {
     int travel;
     /** True once, when a finger lifts. */
     bool released;
+    /** True once, when a finger lifts after a quick touch that barely moved. */
+    bool tap;
 } touch_state_t;
 
 void touch_init(void);

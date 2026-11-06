@@ -17,10 +17,18 @@
 #define SCREEN_H 170
 // The 170-pixel side sits in the middle of the controller's 240 rows, so this holds when flipped.
 #define ROW_OFFSET 35
-#define PIC_W (LED_W * LCD_PITCH)
-#define PIC_H (LED_H * LCD_PITCH)
-#define PIC_X ((SCREEN_W - PIC_W) / 2)
-#define PIC_Y ((SCREEN_H - PIC_H) / 2 + ROW_OFFSET)
+#define SCREEN_BYTES (SCREEN_W * SCREEN_H * 2)
+// Original: the picture's position on the screen.
+#define PIC_X ((SCREEN_W - LED_W * 4) / 2)
+#define PIC_Y ((SCREEN_H - LED_H * 4) / 2)
+// Pan: LED pitch.
+#define PAN_PITCH 10
+// Glow: the grid of 4 px LEDs, and the picture's position in it.
+#define GLOW_W 80
+#define GLOW_H 42
+#define GLOW_X 4
+#define GLOW_Y 13
+#define GLOW_REACH 14
 #define SPI_HZ (40 * 1000 * 1000)
 #define BACKLIGHT_PERCENT 60
 
@@ -31,6 +39,11 @@
 static esp_lcd_panel_io_handle_t s_io;
 static SemaphoreHandle_t s_done;
 static uint16_t *s_pixels;
+// The LED each screen column and row shows, or -1 for a dark gap.
+static int8_t s_cols[LAYOUT_COUNT][SCREEN_W];
+static int8_t s_rows[LAYOUT_COUNT][SCREEN_H];
+// Glow: brightness out of 256 at each distance from the picture.
+static uint16_t s_fade[GLOW_REACH];
 
 typedef struct {
     uint8_t cmd;
@@ -75,26 +88,29 @@ static void set_window(int x, int y, int w, int h)
     ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(s_io, 0x2B, row, sizeof(row)));
 }
 
-static void send(int bytes)
+/** Fills the tables for cells that stretch [leds] LEDs over [size] pixels, with a 1 px gap. */
+static void stretch(int8_t *table, int size, int leds)
 {
-    xSemaphoreTake(s_done, portMAX_DELAY);
-    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_color(s_io, 0x2C, s_pixels, bytes));
+    for (int led = 0; led < leds; led++) {
+        int from = led * size / leds, to = (led + 1) * size / leds;
+        for (int i = from; i < to; i++) table[i] = i == to - 1 ? -1 : led;
+    }
 }
 
-static void clear_screen(void)
+static void build_tables(void)
 {
-    memset(s_pixels, 0, PIC_W * PIC_H * 2);
-    for (int y = 0; y < SCREEN_H; y += PIC_H) {
-        int h = SCREEN_H - y < PIC_H ? SCREEN_H - y : PIC_H;
-        xSemaphoreTake(s_done, portMAX_DELAY);
-        xSemaphoreGive(s_done);
-        set_window(0, y + ROW_OFFSET, PIC_W, h);
-        send(PIC_W * h * 2);
-        xSemaphoreTake(s_done, portMAX_DELAY);
-        xSemaphoreGive(s_done);
-        set_window(PIC_W, y + ROW_OFFSET, SCREEN_W - PIC_W, h);
-        send((SCREEN_W - PIC_W) * h * 2);
+    memset(s_cols, -1, sizeof(s_cols));
+    memset(s_rows, -1, sizeof(s_rows));
+    for (int led = 0; led < LED_W; led++) {
+        for (int i = 0; i < 3; i++) s_cols[LAYOUT_ORIGINAL][PIC_X + led * 4 + i] = led;
     }
+    for (int led = 0; led < LED_H; led++) {
+        for (int i = 0; i < 3; i++) s_rows[LAYOUT_ORIGINAL][PIC_Y + led * 4 + i] = led;
+    }
+    stretch(s_cols[LAYOUT_TALL], SCREEN_W, LED_W);
+    stretch(s_rows[LAYOUT_TALL], SCREEN_H, LED_H);
+    stretch(s_rows[LAYOUT_PAN], SCREEN_H, LED_H);
+    for (int d = 0; d < GLOW_REACH; d++) s_fade[d] = d == 0 ? 256 : 141 * (GLOW_REACH - d) / GLOW_REACH;
 }
 
 static void backlight_init(void)
@@ -122,8 +138,9 @@ void lcd_init(void)
 {
     s_done = xSemaphoreCreateBinary();
     xSemaphoreGive(s_done);
-    s_pixels = heap_caps_malloc(PIC_W * PIC_H * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    s_pixels = heap_caps_calloc(1, SCREEN_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     assert(s_pixels);
+    build_tables();
 
     spi_bus_config_t bus = {
         .mosi_io_num = PIN_LCD_MOSI,
@@ -131,7 +148,7 @@ void lcd_init(void)
         .miso_io_num = -1,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = PIC_W * PIC_H * 2 + 16,
+        .max_transfer_sz = SCREEN_BYTES + 16,
     };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
     esp_lcd_panel_io_spi_config_t io = {
@@ -156,7 +173,7 @@ void lcd_init(void)
         ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(s_io, INIT[i].cmd, INIT[i].data, INIT[i].len));
         if (INIT[i].delay_ms) vTaskDelay(pdMS_TO_TICKS(INIT[i].delay_ms));
     }
-    clear_screen();
+    set_window(0, ROW_OFFSET, SCREEN_W, SCREEN_H);
     backlight_init();
 }
 
@@ -168,30 +185,98 @@ void lcd_set_flipped(bool flipped)
     xSemaphoreGive(s_done);
 }
 
-void lcd_draw(const uint16_t *leds, int shift)
+// The panel takes RGB565 high byte first.
+static inline uint16_t to_panel(uint16_t c)
 {
-    xSemaphoreTake(s_done, portMAX_DELAY);
+    return (uint16_t)(c << 8 | c >> 8);
+}
+
+/** Draws the layouts that are just a grid: each screen pixel shows one LED or a gap. */
+static void draw_cells(const uint16_t *leds, int shift, layout_t layout, int pan)
+{
+    const int8_t *cols = s_cols[layout];
+    const int8_t *rows = s_rows[layout];
     uint16_t *out = s_pixels;
-    for (int row = 0; row < LED_H; row++) {
-        uint16_t *first = out;
-        for (int col = 0; col < LED_W; col++) {
+    int prev = -2;
+    for (int y = 0; y < SCREEN_H; y++, out += SCREEN_W) {
+        int row = rows[y];
+        if (row == prev) {
+            // Same LEDs as the line above.
+            memcpy(out, out - SCREEN_W, SCREEN_W * 2);
+            continue;
+        }
+        prev = row;
+        if (row < 0) {
+            memset(out, 0, SCREEN_W * 2);
+            continue;
+        }
+        const uint16_t *line = &leds[row * LED_W];
+        for (int x = 0; x < SCREEN_W; x++) {
+            int col;
+            if (layout == LAYOUT_PAN) {
+                int p = x + pan;
+                col = p % PAN_PITCH == PAN_PITCH - 1 ? -1 : p / PAN_PITCH;
+            } else {
+                col = cols[x];
+            }
             int src = col - shift;
-            uint16_t c = src >= 0 && src < LED_W ? leds[row * LED_W + src] : 0;
-            // The panel takes RGB565 high byte first.
-            c = (uint16_t)(c << 8 | c >> 8);
+            out[x] = col >= 0 && src >= 0 && src < LED_W ? to_panel(line[src]) : 0;
+        }
+    }
+}
+
+/** Scales an RGB565 colour by [level] out of 256. */
+static inline uint16_t dim(uint16_t c, uint32_t level)
+{
+    uint32_t r = (c >> 11) * level >> 8;
+    uint32_t g = ((c >> 5) & 0x3F) * level >> 8;
+    uint32_t b = (c & 0x1F) * level >> 8;
+    return (uint16_t)(r << 11 | g << 5 | b);
+}
+
+static inline int clamp(int v, int max)
+{
+    return v < 0 ? 0 : v > max ? max : v;
+}
+
+static void draw_glow(const uint16_t *leds, int shift)
+{
+    uint16_t *out = s_pixels;
+    // 42 LEDs of 4 px leave one dark line above and below.
+    memset(out, 0, SCREEN_W * 2);
+    out += SCREEN_W;
+    for (int gy = 0; gy < GLOW_H; gy++) {
+        uint16_t *first = out;
+        int py = gy - GLOW_Y;
+        int dy = py < 0 ? -py : py >= LED_H ? py - (LED_H - 1) : 0;
+        const uint16_t *line = &leds[clamp(py, LED_H - 1) * LED_W];
+        for (int gx = 0; gx < GLOW_W; gx++) {
+            int px = gx - GLOW_X - shift;
+            int dx = px < 0 ? -px : px >= LED_W ? px - (LED_W - 1) : 0;
+            int d = dx > dy ? dx : dy;
+            uint16_t c = 0;
+            if (d < GLOW_REACH) c = to_panel(d == 0 ? line[px] : dim(line[clamp(px, LED_W - 1)], s_fade[d]));
             *out++ = c;
             *out++ = c;
             *out++ = c;
             *out++ = 0;
         }
-        // 3 lit lines, 1 dark.
-        memcpy(out, first, PIC_W * 2);
-        out += PIC_W;
-        memcpy(out, first, PIC_W * 2);
-        out += PIC_W;
-        memset(out, 0, PIC_W * 2);
-        out += PIC_W;
+        memcpy(out, first, SCREEN_W * 2);
+        out += SCREEN_W;
+        memcpy(out, first, SCREEN_W * 2);
+        out += SCREEN_W;
+        memset(out, 0, SCREEN_W * 2);
+        out += SCREEN_W;
     }
-    set_window(PIC_X, PIC_Y, PIC_W, PIC_H);
-    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_color(s_io, 0x2C, s_pixels, PIC_W * PIC_H * 2));
+}
+
+void lcd_draw(const uint16_t *leds, int shift, layout_t layout, int pan)
+{
+    xSemaphoreTake(s_done, portMAX_DELAY);
+    if (layout == LAYOUT_GLOW) {
+        draw_glow(leds, shift);
+    } else {
+        draw_cells(leds, shift, layout, pan);
+    }
+    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_color(s_io, 0x2C, s_pixels, SCREEN_BYTES));
 }

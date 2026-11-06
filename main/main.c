@@ -1,5 +1,6 @@
 // BUSY status display for the Waveshare ESP32-C6-Touch-LCD-1.9: the bar's status animations, swipe
-// left and right to change, flips when the board is turned over.
+// left and right to change, tap for another way of filling the screen, flips when the board is
+// turned over.
 #include <stdlib.h>
 
 
@@ -23,6 +24,9 @@
 #define SAVE_DELAY_US (2 * 1000 * 1000)
 #define NVS_NS "status"
 #define NVS_KEY "current"
+#define NVS_KEY_LAYOUT "layout"
+// LAYOUT_PAN's view takes this long to slide across and back.
+#define PAN_PERIOD_MS 8000
 
 // The touch panel's travel runs the same way as the picture's x, measured on the board.
 #define TOUCH_TO_SCREEN 1
@@ -32,25 +36,33 @@
 static const char *TAG = "busy";
 i2c_master_bus_handle_t g_i2c_bus;
 
-static int load_status(int count)
+static int load_setting(const char *key, int count)
 {
     nvs_handle_t h;
     int32_t v = 0;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        nvs_get_i32(h, NVS_KEY, &v);
+        nvs_get_i32(h, key, &v);
         nvs_close(h);
     }
     return v >= 0 && v < count ? v : 0;
 }
 
-static void save_status(int status)
+static void save_settings(int status, layout_t layout)
 {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_set_i32(h, NVS_KEY, status);
+    nvs_set_i32(h, NVS_KEY_LAYOUT, layout);
     nvs_commit(h);
     nvs_close(h);
-    ESP_LOGI(TAG, "saved %d", status);
+    ESP_LOGI(TAG, "saved status %d, layout %d", status, layout);
+}
+
+static int pan_at(int64_t now_us)
+{
+    int t = (now_us / 1000) % PAN_PERIOD_MS;
+    int half = PAN_PERIOD_MS / 2;
+    return (t < half ? t : PAN_PERIOD_MS - t) * LCD_PAN_MAX / half;
 }
 
 void app_main(void)
@@ -81,7 +93,8 @@ void app_main(void)
         ESP_LOGE(TAG, "no statuses: run tools/pack_status.py, then idf.py flash");
         return;
     }
-    int status = load_status(count);
+    int status = load_setting(NVS_KEY, count);
+    layout_t layout = load_setting(NVS_KEY_LAYOUT, LAYOUT_COUNT);
     anim_select(status, esp_timer_get_time());
     ESP_LOGI(TAG, "%d statuses, showing %s", count, anim_name(status));
 
@@ -117,17 +130,21 @@ void app_main(void)
                 anim_select(status, now);
                 save_at = now + SAVE_DELAY_US;
                 ESP_LOGI(TAG, "swipe dx=%d -> %s", dx, anim_name(status));
+            } else if (t.tap) {
+                layout = (layout + 1) % LAYOUT_COUNT;
+                save_at = now + SAVE_DELAY_US;
+                ESP_LOGI(TAG, "tap -> layout %d", layout);
             }
         }
 
         if (save_at && now >= save_at) {
             save_at = 0;
-            save_status(status);
+            save_settings(status, layout);
         }
 
         if (now >= next_frame) {
             next_frame = now + FRAME_PERIOD_US;
-            lcd_draw(anim_update(now), shift);
+            lcd_draw(anim_update(now), shift, layout, pan_at(now));
             if (++frames == 300) {
                 ESP_LOGI(TAG, "%.1f fps", frames * 1e6 / (now - fps_since));
                 fps_since = now;
