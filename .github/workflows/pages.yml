@@ -1,0 +1,93 @@
+# Builds the firmware and publishes it with the web page, so the page can flash the board.
+# Needs Settings > Pages > Source set to "GitHub Actions".
+#
+# The firmware's version is firmware/version.txt. A new version gets a vX.Y.Z tag once it's
+# published; changing the firmware without bumping the version fails the build, so a board that
+# says it's up to date really is.
+name: Build and publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      new: ${{ steps.version.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # for the version, from git describe
+
+      - name: Check the version
+        id: version
+        run: |
+          VER=$(tr -d '[:space:]' < firmware/version.txt)
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          FIRMWARE="firmware/main firmware/assets firmware/CMakeLists.txt firmware/partitions.csv firmware/sdkconfig.defaults firmware/tools/pack_status.py"
+          if git rev-parse -q --verify "refs/tags/v$VER" > /dev/null; then
+            if ! git diff --quiet "v$VER" HEAD -- $FIRMWARE; then
+              echo "::error::The firmware changed since v$VER was released. Bump firmware/version.txt and add its notes to CHANGELOG.md."
+              exit 1
+            fi
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            grep -qx "## $VER" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## $VER' section."; exit 1; }
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack the status animations
+        run: python3 firmware/tools/pack_status.py
+
+      - name: Build the firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.2
+          target: esp32c6
+          path: firmware
+          command: git config --global --add safe.directory '*' && idf.py build
+
+      - name: Collect the page and firmware
+        run: |
+          sudo chown -R "$(id -u)" firmware/build
+          python3 firmware/tools/make_dist.py site/firmware-dist
+          cp -r index.html manifest.webmanifest app.js protocol.js clockfont.js live.js flash.js style.css fonts icons site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  tag:
+    needs: [build, deploy]
+    if: needs.build.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag the release
+        run: |
+          git tag "v${{ needs.build.outputs.version }}" "$GITHUB_SHA"
+          git push origin "v${{ needs.build.outputs.version }}"

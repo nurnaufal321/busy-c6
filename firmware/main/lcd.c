@@ -1,6 +1,5 @@
 #include "lcd.h"
 
-#include <math.h>
 #include <string.h>
 
 #include "board.h"
@@ -23,23 +22,6 @@
 // Original: the picture's position on the screen.
 #define PIC_X ((SCREEN_W - LED_W * 4) / 2)
 #define PIC_Y ((SCREEN_H - LED_H * 4) / 2)
-// Pan: LED pitch.
-#define PAN_PITCH 10
-// Tall and Glow: a full-screen grid of even 4 px dots.
-#define DOTS_W 80
-#define DOTS_H 42
-// Tall: its own finer grid of 3 px dots (2 lit, 1 dark), the black border around the picture and
-// the corner radius, in dots.
-#define TALL_PITCH 3
-#define TALL_GRID_W (SCREEN_W / TALL_PITCH)
-#define TALL_GRID_H (SCREEN_H / TALL_PITCH)
-#define TALL_BORDER 3
-#define TALL_W (TALL_GRID_W - 2 * TALL_BORDER)
-#define TALL_H (TALL_GRID_H - 2 * TALL_BORDER)
-#define TALL_RADIUS 13
-// Tall: the picture keeps its shape, so it fills the width and these rows of the panel's height.
-#define TALL_PIC_H (LED_H * TALL_W / LED_W)
-#define TALL_PIC_Y ((TALL_H - TALL_PIC_H) / 2)
 // Clock: where the picture's rows start, and the row of text below it.
 #define CLOCK_PIC_TOP 4
 #define CLOCK_TEXT_X 10
@@ -49,10 +31,6 @@
 #define CLOCK_TIME_BASELINE 152
 #define CLOCK_DATE1_BASELINE 121
 #define CLOCK_DATE2_BASELINE 152
-// Glow: the picture's position in the grid.
-#define GLOW_X 4
-#define GLOW_Y 13
-#define GLOW_REACH 14
 #define SPI_HZ (40 * 1000 * 1000)
 #define BACKLIGHT_PERCENT 60
 
@@ -63,23 +41,9 @@
 static esp_lcd_panel_io_handle_t s_io;
 static SemaphoreHandle_t s_done;
 static uint16_t *s_pixels;
-// The LED each screen column and row shows, or -1 for a dark gap.
-static int8_t s_cols[LAYOUT_COUNT][SCREEN_W];
-static int8_t s_rows[LAYOUT_COUNT][SCREEN_H];
-// Tall: where each dot samples the picture: the two nearest LEDs and the weight of the second, out
-// of 256.
-typedef struct {
-    uint8_t a, b;
-    uint16_t weight;
-} sample_t;
-static sample_t s_tall_x[TALL_W];
-static sample_t s_tall_y[TALL_H];
-// Tall: dots left dark at each end of a row, which rounds the corners.
-static uint8_t s_tall_inset[TALL_H];
-// Tall: brightness of each row out of 256; the rows above and below the picture fade out.
-static uint16_t s_tall_fade[TALL_H];
-// Glow: brightness out of 256 at each distance from the picture.
-static uint16_t s_fade[GLOW_REACH];
+// The LED each screen column and row shows in Original, or -1 for a dark gap.
+static int8_t s_cols[SCREEN_W];
+static int8_t s_rows[SCREEN_H];
 
 typedef struct {
     uint8_t cmd;
@@ -124,61 +88,16 @@ static void set_window(int x, int y, int w, int h)
     ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(s_io, 0x2B, row, sizeof(row)));
 }
 
-/** Fills the tables for cells that stretch [leds] LEDs over [size] pixels, with a 1 px gap. */
-static void stretch(int8_t *table, int size, int leds)
-{
-    for (int led = 0; led < leds; led++) {
-        int from = led * size / leds, to = (led + 1) * size / leds;
-        for (int i = from; i < to; i++) table[i] = i == to - 1 ? -1 : led;
-    }
-}
-
-/**
- * Samples for [dots] dots across [leds] LEDs. The blend is a smoothstep rather than a straight
- * line, so edges in the picture stay crisp instead of going soft.
- */
-static void build_samples(sample_t *table, int dots, int leds)
-{
-    for (int i = 0; i < dots; i++) {
-        float pos = (i + 0.5f) * leds / dots - 0.5f;
-        if (pos < 0) pos = 0;
-        int a = (int)pos;
-        int b = a + 1 < leds ? a + 1 : a;
-        float t = pos - a;
-        t = t * t * (3 - 2 * t);
-        table[i] = (sample_t){.a = a, .b = b, .weight = (uint16_t)(t * 256)};
-    }
-}
-
 static void build_tables(void)
 {
     memset(s_cols, -1, sizeof(s_cols));
     memset(s_rows, -1, sizeof(s_rows));
     for (int led = 0; led < LED_W; led++) {
-        for (int i = 0; i < 3; i++) s_cols[LAYOUT_ORIGINAL][PIC_X + led * 4 + i] = led;
+        for (int i = 0; i < 3; i++) s_cols[PIC_X + led * 4 + i] = led;
     }
     for (int led = 0; led < LED_H; led++) {
-        for (int i = 0; i < 3; i++) s_rows[LAYOUT_ORIGINAL][PIC_Y + led * 4 + i] = led;
+        for (int i = 0; i < 3; i++) s_rows[PIC_Y + led * 4 + i] = led;
     }
-    build_samples(s_tall_x, TALL_W, LED_W);
-    build_samples(&s_tall_y[TALL_PIC_Y], TALL_PIC_H, LED_H);
-    for (int y = 0; y < TALL_H; y++) {
-        int above = TALL_PIC_Y - y;
-        int below = y - (TALL_PIC_Y + TALL_PIC_H - 1);
-        int d = above > 0 ? above : below > 0 ? below : 0;
-        s_tall_fade[y] = d == 0 ? 256 : 141 * (TALL_PIC_Y + 1 - d) / (TALL_PIC_Y + 1);
-        // The rows outside the picture repeat its nearest edge.
-        if (above > 0) s_tall_y[y] = (sample_t){.a = 0, .b = 0, .weight = 0};
-        if (below > 0) s_tall_y[y] = (sample_t){.a = LED_H - 1, .b = LED_H - 1, .weight = 0};
-    }
-    for (int i = 0; i < TALL_RADIUS; i++) {
-        float dy = TALL_RADIUS - i - 0.5f;
-        int inset = (int)(TALL_RADIUS - sqrtf(TALL_RADIUS * TALL_RADIUS - dy * dy) + 0.5f);
-        s_tall_inset[i] = inset;
-        s_tall_inset[TALL_H - 1 - i] = inset;
-    }
-    stretch(s_rows[LAYOUT_PAN], SCREEN_H, LED_H);
-    for (int d = 0; d < GLOW_REACH; d++) s_fade[d] = d == 0 ? 256 : 141 * (GLOW_REACH - d) / GLOW_REACH;
 }
 
 static void backlight_init(void)
@@ -259,15 +178,13 @@ static inline uint16_t to_panel(uint16_t c)
     return (uint16_t)(c << 8 | c >> 8);
 }
 
-/** Draws the layouts that are just a grid: each screen pixel shows one LED or a gap. */
-static void draw_cells(const uint16_t *leds, int shift, layout_t layout, int pan)
+/** Original: each screen pixel shows one LED or a gap. */
+static void draw_original(const uint16_t *leds, int shift, int ox, int oy)
 {
-    const int8_t *cols = s_cols[layout];
-    const int8_t *rows = s_rows[layout];
     uint16_t *out = s_pixels;
     int prev = -2;
     for (int y = 0; y < SCREEN_H; y++, out += SCREEN_W) {
-        int row = rows[y];
+        int row = y >= oy ? s_rows[y - oy] : -1;
         if (row == prev) {
             // Same LEDs as the line above.
             memcpy(out, out - SCREEN_W, SCREEN_W * 2);
@@ -280,91 +197,10 @@ static void draw_cells(const uint16_t *leds, int shift, layout_t layout, int pan
         }
         const uint16_t *line = &leds[row * LED_W];
         for (int x = 0; x < SCREEN_W; x++) {
-            int col;
-            if (layout == LAYOUT_PAN) {
-                int p = x + pan;
-                col = p % PAN_PITCH == PAN_PITCH - 1 ? -1 : p / PAN_PITCH;
-            } else {
-                col = cols[x];
-            }
+            int col = x >= ox ? s_cols[x - ox] : -1;
             int src = col - shift;
             out[x] = col >= 0 && src >= 0 && src < LED_W ? to_panel(line[src]) : 0;
         }
-    }
-}
-
-/** Scales an RGB565 colour by [level] out of 256. */
-static inline uint16_t dim(uint16_t c, uint32_t level)
-{
-    uint32_t r = (c >> 11) * level >> 8;
-    uint32_t g = ((c >> 5) & 0x3F) * level >> 8;
-    uint32_t b = (c & 0x1F) * level >> 8;
-    return (uint16_t)(r << 11 | g << 5 | b);
-}
-
-static inline int clamp(int v, int max)
-{
-    return v < 0 ? 0 : v > max ? max : v;
-}
-
-/** The picture's LED at [x], [y], with black beyond the sides while a swipe drags it. */
-static inline uint16_t led_at(const uint16_t *leds, int x, int y)
-{
-    return x >= 0 && x < LED_W ? leds[y * LED_W + x] : 0;
-}
-
-/** Blends two RGB565 colours; [w] out of 256 is the share of the second. */
-static inline uint16_t blend(uint16_t c0, uint16_t c1, uint32_t w)
-{
-    if (c0 == c1) return c0;
-    uint32_t v = 256 - w;
-    uint32_t r = ((c0 >> 11) * v + (c1 >> 11) * w) >> 8;
-    uint32_t g = (((c0 >> 5) & 0x3F) * v + ((c1 >> 5) & 0x3F) * w) >> 8;
-    uint32_t b = ((c0 & 0x1F) * v + (c1 & 0x1F) * w) >> 8;
-    return (uint16_t)(r << 11 | g << 5 | b);
-}
-
-/** A row of dots is 3 lit lines and a dark one; [first] holds the first line already. */
-static uint16_t *finish_dot_row(uint16_t *first)
-{
-    uint16_t *out = first + SCREEN_W;
-    memcpy(out, first, SCREEN_W * 2);
-    out += SCREEN_W;
-    memcpy(out, first, SCREEN_W * 2);
-    out += SCREEN_W;
-    memset(out, 0, SCREEN_W * 2);
-    return out + SCREEN_W;
-}
-
-/**
- * The picture resampled onto fine, even dots at its own shape, with the rest of the height glowing
- * from its edge colours, inside a black border with round corners.
- */
-static void draw_tall(const uint16_t *leds, int shift)
-{
-    memset(s_pixels, 0, SCREEN_BYTES);
-    int margin_x = (SCREEN_W - TALL_GRID_W * TALL_PITCH + 1) / 2;
-    int margin_y = (SCREEN_H - TALL_GRID_H * TALL_PITCH + 1) / 2;
-    int drag = shift * TALL_W / LED_W;
-    for (int gy = 0; gy < TALL_H; gy++) {
-        const sample_t *sy = &s_tall_y[gy];
-        uint16_t *line = s_pixels + SCREEN_W * (margin_y + (TALL_BORDER + gy) * TALL_PITCH);
-        int inset = s_tall_inset[gy];
-        uint32_t fade = s_tall_fade[gy];
-        for (int dot = inset; dot < TALL_W - inset; dot++) {
-            int src = dot - drag;
-            if (src < 0 || src >= TALL_W) continue;
-            const sample_t *sx = &s_tall_x[src];
-            uint16_t top = blend(led_at(leds, sx->a, sy->a), led_at(leds, sx->b, sy->a), sx->weight);
-            uint16_t bottom = blend(led_at(leds, sx->a, sy->b), led_at(leds, sx->b, sy->b), sx->weight);
-            uint16_t c = blend(top, bottom, sy->weight);
-            if (fade != 256) c = dim(c, fade);
-            c = to_panel(c);
-            uint16_t *px = line + margin_x + (TALL_BORDER + dot) * TALL_PITCH;
-            px[0] = c;
-            px[1] = c;
-        }
-        memcpy(line + SCREEN_W, line, SCREEN_W * 2);
     }
 }
 
@@ -414,16 +250,16 @@ static int text_width(const font_t *font, const char *text)
 }
 
 /** The picture exactly as in Original, moved to the top, with the date and time below. */
-static void draw_clock(const uint16_t *leds, int shift, const lcd_clock_t *clock)
+static void draw_clock(const uint16_t *leds, int shift, int ox, int oy, const lcd_clock_t *clock)
 {
     memset(s_pixels, 0, SCREEN_BYTES);
     for (int row = 0; row < LED_H; row++) {
-        uint16_t *line = s_pixels + SCREEN_W * (CLOCK_PIC_TOP + row * 4);
+        uint16_t *line = s_pixels + SCREEN_W * (CLOCK_PIC_TOP + oy + row * 4);
         for (int col = 0; col < LED_W; col++) {
             int src = col - shift;
             if (src < 0 || src >= LED_W) continue;
             uint16_t c = to_panel(leds[row * LED_W + src]);
-            uint16_t *px = line + PIC_X + col * 4;
+            uint16_t *px = line + PIC_X + ox + col * 4;
             px[0] = c;
             px[1] = c;
             px[2] = c;
@@ -438,43 +274,15 @@ static void draw_clock(const uint16_t *leds, int shift, const lcd_clock_t *clock
     draw_text(&font_time, clock->time, time_x, CLOCK_TIME_BASELINE, clock->colon ? 0 : ':');
 }
 
-static void draw_glow(const uint16_t *leds, int shift)
+void lcd_draw(const uint16_t *leds, int shift, layout_t layout, int half, const lcd_clock_t *clock)
 {
-    uint16_t *out = s_pixels;
-    // 42 dots of 4 px leave one dark line above and below.
-    memset(out, 0, SCREEN_W * 2);
-    out += SCREEN_W;
-    for (int gy = 0; gy < DOTS_H; gy++) {
-        uint16_t *first = out;
-        int py = gy - GLOW_Y;
-        int dy = py < 0 ? -py : py >= LED_H ? py - (LED_H - 1) : 0;
-        const uint16_t *line = &leds[clamp(py, LED_H - 1) * LED_W];
-        for (int gx = 0; gx < DOTS_W; gx++) {
-            int px = gx - GLOW_X - shift;
-            int dx = px < 0 ? -px : px >= LED_W ? px - (LED_W - 1) : 0;
-            int d = dx > dy ? dx : dy;
-            uint16_t c = 0;
-            if (d < GLOW_REACH) c = to_panel(d == 0 ? line[px] : dim(line[clamp(px, LED_W - 1)], s_fade[d]));
-            *out++ = c;
-            *out++ = c;
-            *out++ = c;
-            *out++ = 0;
-        }
-        out = finish_dot_row(first);
-    }
-}
-
-void lcd_draw(const uint16_t *leds, int shift, layout_t layout, int pan, const lcd_clock_t *clock)
-{
+    // Half an LED is 2 of the 4 pixels between LEDs.
+    int ox = half & 1 ? 2 : 0, oy = half & 2 ? 2 : 0;
     xSemaphoreTake(s_done, portMAX_DELAY);
-    if (layout == LAYOUT_GLOW) {
-        draw_glow(leds, shift);
-    } else if (layout == LAYOUT_TALL) {
-        draw_tall(leds, shift);
-    } else if (layout == LAYOUT_CLOCK) {
-        draw_clock(leds, shift, clock);
+    if (layout == LAYOUT_CLOCK) {
+        draw_clock(leds, shift, ox, oy, clock);
     } else {
-        draw_cells(leds, shift, layout, pan);
+        draw_original(leds, shift, ox, oy);
     }
     ESP_ERROR_CHECK(esp_lcd_panel_io_tx_color(s_io, 0x2C, s_pixels, SCREEN_BYTES));
 }

@@ -34,7 +34,23 @@ a { color: var(--link); }
 .sub { color: var(--text-2); font-size: 14px; line-height: 1.5; }
 
 /* ---------- header ---------- */
-.top { padding-top: 40px; padding-bottom: 24px; }
+.top { padding-top: 40px; padding-bottom: 24px; display: flex; align-items: stretch; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+/* The title and tagline at the top, the view buttons level with the preview's bottom edge. */
+.intro { flex: 1; min-width: 260px; display: flex; flex-direction: column; }
+.top .intro .tagline span { display: inline; }
+.view-control { margin-top: auto; padding-top: 24px; }
+.view-hint { font: 13px/1 var(--mono); text-transform: none; letter-spacing: 0; color: var(--text-2); margin-left: 8px; }
+.grid.view-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* live.js sizes the preview to the height of the title and tagline beside it. */
+.live-wrap { margin: 0; }
+.live-wrap[hidden] { display: none; }
+.live-label {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  font: 12px/1 var(--head); text-transform: uppercase; letter-spacing: 1px; color: var(--error);
+}
+.live-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--error); animation: live-pulse 1.6s ease-in-out infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 .top h1 {
   font: 64px/1.0 var(--head);
   margin: 0;
@@ -113,6 +129,8 @@ button:disabled, button:disabled:hover {
 /* ---------- connection ---------- */
 .conn { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .conn-text { flex: 1; min-width: 200px; }
+.live { display: block; width: 320px; max-width: 100%; height: auto; background: var(--black); border: var(--thick) solid var(--black); border-radius: 12px; image-rendering: pixelated; }
+.live[hidden] { display: none; }
 .conn .title { font: 600 22px/1.2 var(--body); margin-bottom: 8px; }
 
 /* ---------- controls ---------- */
@@ -186,6 +204,12 @@ input[type="checkbox"]:disabled { border-color: var(--disabled-border); backgrou
 .grid button { letter-spacing: 1px; padding: 10px 12px; }
 .grid button.on { background: var(--black); color: var(--white); }
 .grid .empty { grid-column: 1 / -1; }
+/* A saved custom status: its button with a delete button joined on. */
+.grid .deletable { display: flex; }
+.grid .deletable > button:first-child { flex: 1; min-width: 0; }
+.grid .deletable .delete { flex: 0 0 auto; margin-left: calc(-1 * var(--thick)); padding: 10px 14px; letter-spacing: 0; }
+.grid .deletable .delete:hover { background: var(--error); border-color: var(--error); color: var(--white); }
+#clear[hidden] { display: none; }
 
 /* ---------- custom status ---------- */
 .custom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
@@ -203,13 +227,27 @@ input[type="checkbox"]:disabled { border-color: var(--disabled-border); backgrou
 .custom .actions { margin-top: 16px; }
 
 /* ---------- clock ---------- */
-.upload-info { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 16px; }
-#summary { font: 600 22px/1.2 var(--body); }
 .status { font: 15px/1.5 var(--mono); min-height: 1.5em; margin-bottom: 16px; }
 .status.ok { color: var(--success); }
 .status.err { color: var(--error); }
 .actions { display: flex; gap: 16px; flex-wrap: wrap; }
 .actions .primary { flex: 1; min-width: 220px; min-height: 56px; padding: 16px 40px; font-size: 18px; }
+
+/* ---------- firmware ---------- */
+#fw-summary { margin-bottom: 12px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.conn-status { margin: 12px 0 0; }
+.conn-status:empty { display: none; }
+a.chip { text-decoration: none; }
+a.chip.warn:hover { background: var(--warning); color: var(--white); }
+.notes { margin: 0 0 16px; padding-left: 20px; font-size: 14px; line-height: 1.5; }
+.progress { display: block; width: 100%; height: 12px; margin-bottom: 12px; appearance: none; border: var(--thick) solid var(--black); background: var(--white); }
+.progress::-webkit-progress-bar { background: var(--white); }
+.progress::-webkit-progress-value { background: var(--black); }
+.progress::-moz-progress-bar { background: var(--black); }
+.advanced { margin-top: 16px; }
+.advanced summary { cursor: pointer; font: 14px/1.2 var(--head); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+.advanced .sub { margin-bottom: 12px; }
 
 /* ---------- log ---------- */
 .log { border-top: var(--thick) solid var(--black); margin-bottom: 40px; }

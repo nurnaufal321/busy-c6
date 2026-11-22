@@ -4,20 +4,20 @@ Standalone firmware that shows the BUSY Bar's 13 status animations on the 1.9-in
 It has no Wi-Fi or Bluetooth. A web page sets the time and status over USB; see `../PROTOCOL.md`.
 
 - **Swipe left / right:** next / previous status, wrapping.
-- **Tap:** the next way of filling the screen, in this order:
+- **Tap:** switch between the two ways of filling the screen:
   - **Original:** 4 px LEDs in the middle of the screen, with black bars.
-  - **Tall:** the picture at its own shape on fine 3 px dots, in a rounded panel that fills the
-    screen, with its edge colours fading out above and below.
-  - **Pan:** 10 px LEDs filling the height, the view sliding slowly across the picture.
-  - **Glow:** the original picture, with its edge colours fading out into the bars.
   - **Clock:** the picture at the top, with the date and time below. The time comes from the
     [web page](https://nurnaufal321.github.io/busy-c6/) over USB.
 - **Turn the board over:** the picture flips, and left stays left.
 
-It remembers the last status and layout after power-off. The picture is the bar's 72×16 display
+It remembers the last status and layout after power-off. It also saves the time every 30 seconds, and
+after a power cut it carries on from that time, with a steady colon, until the page sets it again. The picture is the bar's 72×16 display
 on the 320×170 screen.
 
 ## Build and flash
+
+The easy way: the [web page](https://nurnaufal321.github.io/busy-c6/)'s **Firmware** card flashes the
+latest build from `main`. To build it yourself:
 
 Needs ESP-IDF 5.5 or later.
 
@@ -31,6 +31,9 @@ idf.py -p /dev/cu.usbmodemXXXX flash
 `tools/pack_status.py` packs the animations from `assets/` into `pack/status.pack`
 (about 1.5 MB), and checks the result frame by frame against the source PNGs. `idf.py flash`
 writes the pack to the `status` partition along with the app.
+
+`tools/make_dist.py` copies a finished build into `../firmware-dist/` with a `manifest.json`, which is
+what the page flashes from. CI runs it on every push to `main`.
 
 `main/font_data.c` is generated from Roboto Bold by `tools/gen_font.swift` and checked in, so you only
 need to rerun that to change the clock's font or sizes.

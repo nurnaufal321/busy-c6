@@ -9,12 +9,25 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono&family=Work+Sans:wght@400;600&display=swap">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#000000">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
-    <h1>BUSY C6</h1>
-    <p class="tagline"><span>A status light for your desk, on a Waveshare ESP32-C6 touch display.</span> <span>Plug in the cable. Connect. Set the clock and status.</span></p>
+    <div class="intro">
+      <h1>BUSY C6</h1>
+      <p class="tagline"><span>A status light for your desk, on a Waveshare ESP32-C6 touch display.</span> <span>Plug in the cable. Connect. Set the clock and status.</span></p>
+      <div class="view-control">
+        <p class="label">View <span class="view-hint">Or tap the board</span></p>
+        <div id="views" class="grid view-grid"></div>
+      </div>
+    </div>
+    <figure id="live-wrap" class="live-wrap" hidden>
+      <figcaption class="live-label"><span class="live-dot"></span>Live</figcaption>
+      <canvas id="live" class="live" width="320" height="170"></canvas>
+    </figure>
   </header>
 
   <main>
@@ -26,20 +39,14 @@
     <section class="card conn">
       <div class="conn-text">
         <p id="board-name" class="title">No board connected</p>
-        <span id="board-status" class="chip">Not connected</span>
+        <div class="chips">
+          <span id="board-status" class="chip">Not connected</span>
+          <a id="fw-chip" class="chip" href="#firmware" hidden></a>
+          <span id="clock-chip" class="chip" title="The page sends this computer's time when it connects and every minute after" hidden></span>
+        </div>
+        <p id="status" class="status conn-status" role="status"></p>
       </div>
       <button id="connect">Connect</button>
-    </section>
-
-    <section class="card heavy">
-      <div class="upload-info">
-        <span id="summary">The board's clock isn't set.</span>
-        <span id="clock-chip" class="chip warn">Lost when unplugged</span>
-      </div>
-      <p id="status" class="status" role="status"></p>
-      <div class="actions">
-        <button id="sync" class="primary" title="Send this computer's time to the board" disabled>Sync clock</button>
-      </div>
     </section>
 
     <section class="card">
@@ -48,12 +55,7 @@
     </section>
 
     <section class="card">
-      <div class="head"><h2>View</h2><span class="meta">Or tap the board</span></div>
-      <div id="views" class="grid"></div>
-    </section>
-
-    <section class="card">
-      <div class="head"><h2>Custom status</h2><span class="meta">Stays on the board</span></div>
+      <div class="head"><h2>Custom status</h2><span class="meta">Saved on the board, up to 8</span></div>
       <div class="custom">
         <div class="fields">
           <label class="field"><span class="label">Line 1</span><input type="text" id="line1" value="BACK AT 3" maxlength="24" autocomplete="off"></label>
@@ -74,6 +76,23 @@
       </div>
     </section>
 
+    <section class="card" id="firmware">
+      <div class="head"><h2>Firmware</h2><span id="fw-meta" class="meta">Updates over the USB cable</span></div>
+      <p id="fw-summary" class="sub">Checking for firmware…</p>
+      <ul id="fw-notes" class="notes" hidden></ul>
+      <progress id="fw-progress" class="progress" max="1" value="0" hidden></progress>
+      <p id="fw-status" class="status" role="status"></p>
+      <div class="actions">
+        <button id="fw-update" title="Write the latest firmware and animations. Settings and the custom status are kept." disabled>Update</button>
+      </div>
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <p class="sub">Full install also writes the bootloader and partition table, for a new board or one that won't start.
+          If the page can't find the board, hold <b>BOOT</b>, tap <b>RESET</b>, let go of <b>BOOT</b>, then press Full install and pick its port.</p>
+        <div class="actions"><button id="fw-full" disabled>Full install</button></div>
+      </details>
+    </section>
+
     <details class="log">
       <summary>Activity log</summary>
       <pre id="log"></pre>
@@ -91,7 +110,7 @@
         </div>
         <div>
           <p class="label">The clock</p>
-          <p>The board has no clock battery, so it forgets the time when it loses power. Open this page again to set it. It stays in sync while the page is open.</p>
+          <p>The board has no clock battery. It saves the time every 30 seconds and carries on from there after losing power, a little behind, with a steady colon. Open this page to set it exactly. It stays in sync while the page is open.</p>
         </div>
         <div>
           <p class="label">Your data</p>
@@ -103,5 +122,8 @@
 
   <script src="protocol.js"></script>
   <script src="app.js"></script>
+  <script src="clockfont.js"></script>
+  <script src="live.js"></script>
+  <script type="module" src="flash.js"></script>
 </body>
 </html>

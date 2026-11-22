@@ -9,6 +9,7 @@
 #include "board.h"
 #include "clock.h"
 #include "driver/i2c_master.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -27,9 +28,10 @@
 #define SAVE_DELAY_US (2 * 1000 * 1000)
 #define NVS_NS "status"
 #define NVS_KEY "current"
-#define NVS_KEY_LAYOUT "layout"
-// LAYOUT_PAN's view takes this long to slide across and back.
-#define PAN_PERIOD_MS 8000
+#define NVS_KEY_LAYOUT "view"
+// The key from when there were five views; Clock was 4.
+#define NVS_KEY_OLD_LAYOUT "layout"
+#define OLD_LAYOUT_CLOCK 4
 
 // The touch panel's travel runs the same way as the picture's x, measured on the board.
 #define TOUCH_TO_SCREEN 1
@@ -66,15 +68,23 @@ static void report(int status, layout_t layout)
 {
     printf("BUSY names=");
     for (int i = 0; i < anim_count(); i++) printf("%s%s", i ? "," : "", anim_name(i));
-    printf(" status=%d layout=%d custom=%d time=%d\n", status, layout, anim_has_custom(), clock_is_set());
+    printf(" status=%d layout=%d custom=%d time=%d fw=%s\n", status, layout, anim_custom_count(), clock_is_synced(),
+           esp_app_get_description()->version);
     fflush(stdout);
 }
 
-static int pan_at(int64_t now_us)
+/** The saved view, carried over from the five-view firmware the first time. */
+static layout_t load_layout(void)
 {
-    int t = (now_us / 1000) % PAN_PERIOD_MS;
-    int half = PAN_PERIOD_MS / 2;
-    return (t < half ? t : PAN_PERIOD_MS - t) * LCD_PAN_MAX / half;
+    nvs_handle_t h;
+    int32_t v = LAYOUT_ORIGINAL;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_i32(h, NVS_KEY_LAYOUT, &v) != ESP_OK && nvs_get_i32(h, NVS_KEY_OLD_LAYOUT, &v) == ESP_OK) {
+            v = v == OLD_LAYOUT_CLOCK ? LAYOUT_CLOCK : LAYOUT_ORIGINAL;
+        }
+        nvs_close(h);
+    }
+    return v >= 0 && v < LAYOUT_COUNT ? v : LAYOUT_ORIGINAL;
 }
 
 void app_main(void)
@@ -106,7 +116,7 @@ void app_main(void)
         return;
     }
     int status = load_setting(NVS_KEY, count);
-    layout_t layout = load_setting(NVS_KEY_LAYOUT, LAYOUT_COUNT);
+    layout_t layout = load_layout();
     anim_select(status, esp_timer_get_time());
     ESP_LOGI(TAG, "%d statuses, showing %s", count, anim_name(status));
     clock_init();
@@ -174,14 +184,39 @@ void app_main(void)
                     save_at = now + SAVE_DELAY_US;
                 }
                 break;
-            case LINK_CUSTOM:
-                anim_set_custom(cmd.pixels);
-                status = anim_count() - 1;
+            case LINK_CUSTOM: {
+                int saved = anim_custom_save(cmd.name, cmd.pixels, cmd.half);
+                if (saved < 0) {
+                    ESP_LOGW(TAG, "no room for %s", cmd.name);
+                    break;
+                }
+                status = saved;
                 anim_select(status, now);
                 save_at = now + SAVE_DELAY_US;
                 break;
+            }
+            case LINK_CUSTOM_DELETE: {
+                int gone = anim_custom_delete(cmd.name);
+                if (gone < 0) break;
+                // Keep showing the same status; if it was the one deleted, go back to the first.
+                if (status == gone) status = 0;
+                else if (status > gone) status--;
+                anim_select(status, now);
+                save_at = now + SAVE_DELAY_US;
+                break;
+            }
+            case LINK_CUSTOM_GET: {
+                const uint16_t *pixels;
+                int half;
+                if (!anim_custom_get(cmd.name, &pixels, &half)) break;
+                printf("BUSYCUSTOM %s ", cmd.name);
+                for (int i = 0; i < LED_PIXELS; i++) printf("%04X", pixels[i]);
+                printf(" %d %d\n", half & 1, half >> 1 & 1);
+                fflush(stdout);
+                break;
+            }
             case LINK_CUSTOM_CLEAR:
-                anim_clear_custom();
+                anim_custom_clear();
                 if (status >= anim_count()) {
                     status = 0;
                     anim_select(status, now);
@@ -192,6 +227,8 @@ void app_main(void)
             report(status, layout);
         }
 
+        clock_tick(now);
+
         if (save_at && now >= save_at) {
             save_at = 0;
             save_settings(status, layout);
@@ -201,7 +238,7 @@ void app_main(void)
             next_frame = now + FRAME_PERIOD_US;
             lcd_clock_t row;
             clock_read(&row);
-            lcd_draw(anim_update(now), shift, layout, pan_at(now), &row);
+            lcd_draw(anim_update(now), shift, layout, anim_half(), &row);
             if (++frames == 300) {
                 ESP_LOGI(TAG, "%.1f fps", frames * 1e6 / (now - fps_since));
                 fps_since = now;

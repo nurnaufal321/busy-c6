@@ -35,7 +35,8 @@ OUT = ROOT / "pack" / "status.pack"
 W, H = 72, 16
 PIXELS = W * H
 # The flash partition for the pack; see partitions.csv.
-LIMIT = 0x6C0000
+# The status partition, less the 8 sectors at its end where the board keeps saved custom statuses.
+LIMIT = 0x6C0000 - 8 * 4096
 NAME_LEN = 24
 
 

@@ -8,9 +8,6 @@
 /** How the 72x16 picture fills the 320x170 screen. A tap steps through these. */
 typedef enum {
     LAYOUT_ORIGINAL,  // 4 px LEDs, centred, black bars
-    LAYOUT_TALL,      // fine, even 3 px dots at the picture's own shape, glow above and below, round corners
-    LAYOUT_PAN,       // 10 px LEDs, the view sliding across the picture
-    LAYOUT_GLOW,      // 4 px LEDs, the edge colours fading out into the bars
     LAYOUT_CLOCK,     // the picture at the top, with the date and time below
     LAYOUT_COUNT,
 } layout_t;
@@ -23,17 +20,14 @@ typedef struct {
     bool colon;    // the colon's blink
 } lcd_clock_t;
 
-/** How far LAYOUT_PAN's view can slide, in pixels. */
-#define LCD_PAN_MAX 400
-
 void lcd_init(void);
 
 /** Turns the picture upside down, or back. */
 void lcd_set_flipped(bool flipped);
 
 /**
- * Draws the 72x16 RGB565 picture as LEDs, moved [shift] LEDs sideways with black coming in. [pan]
- * is LAYOUT_PAN's view position, 0 to LCD_PAN_MAX; [clock] is LAYOUT_CLOCK's row. Returns once the transfer has started; the next
+ * Draws the 72x16 RGB565 picture as LEDs, moved [shift] LEDs sideways with black coming in. [half]
+ * moves it half an LED (bit 0 right, bit 1 down); [clock] is LAYOUT_CLOCK's row. Returns once the transfer has started; the next
  * call waits for it to finish.
  */
-void lcd_draw(const uint16_t *leds, int shift, layout_t layout, int pan, const lcd_clock_t *clock);
+void lcd_draw(const uint16_t *leds, int shift, layout_t layout, int half, const lcd_clock_t *clock);
