@@ -11,6 +11,7 @@ const $ = (s) => document.querySelector(s);
 const page = window.busyPage;
 let manifest = null;
 let busy = false;
+let openedForUpdate = false;
 
 function say(msg, kind = '') {
   const el = $('#fw-status');
@@ -43,6 +44,11 @@ function render() {
     : order === 0 ? ['Your board is up to date, on version ', v(fw), '.']
     : order === -1 ? ['Version ', v(latest), ' is available. What\'s new:']
     : ['Your board has version ', v(fw), ', newer than the published version ', v(latest), '.']));
+  // Unfold the card once when an update turns up, so its notes and button are in view.
+  if (order === -1 && !openedForUpdate) {
+    openedForUpdate = true;
+    $('#firmware').open = true;
+  }
   // With an update waiting, the corner says what the board has now.
   $('#fw-meta').textContent = order === -1 ? `Your board: ${fw || 'before 1.0.0'}` : 'Updates over the USB cable';
   const notes = order === -1 ? manifest.notes ?? [] : [];
@@ -156,5 +162,7 @@ $('#fw-full').addEventListener('click', () => {
     flash(FULL_ROLES, 'Full install');
   }
 });
+// The "Update available" chip at the top jumps here; make sure the card is open when it does.
+$('#fw-chip').addEventListener('click', () => { $('#firmware').open = true; });
 page.onRender(render);
 loadManifest();

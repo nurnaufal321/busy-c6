@@ -17,9 +17,23 @@
   }
   const CLOCK = 1;
   const page = window.busyPage;
+  // Drawn at 3x the board's resolution so it stays sharp when the browser scales it: the board's
+  // pixels as exact 3x3 blocks, and the clock's text with the real font rather than its bitmap.
+  const SCALE = 3;
   const canvas = document.querySelector('#live');
   const ctx = canvas.getContext('2d');
-  const image = ctx.createImageData(SW, SH);
+  const low = document.createElement('canvas');
+  low.width = SW;
+  low.height = SH;
+  const lowCtx = low.getContext('2d');
+  const image = lowCtx.createImageData(SW, SH);
+  // Roboto Bold at the sizes tools/gen_font.swift renders the board's fonts from.
+  const ROBOTO = { time: 72, date: 30 };
+  let robotoReady = false;
+  document.fonts.load(`700 ${ROBOTO.time}px Roboto`).then(() => {
+    robotoReady = document.fonts.check(`700 ${ROBOTO.time}px Roboto`);
+    lastKey = '';
+  }).catch(() => {});
   const screen = new Uint16Array(SW * SH);
 
   // ---------- the status animation (main/anim.c) ----------
@@ -146,7 +160,8 @@
         }
       }
     }
-    if (!fonts.time) return;
+    // With Roboto loaded, paint() draws the text over the top, sharp; this bitmap is the fallback.
+    if (!fonts.time || robotoReady) return;
     drawText(fonts.date, clock.day, CLOCK_TEXT_X, CLOCK_DATE1_BASELINE);
     drawText(fonts.date, clock.date, CLOCK_TEXT_X, CLOCK_DATE2_BASELINE);
     drawText(fonts.time, clock.time, SW - CLOCK_TEXT_X - textWidth(fonts.time, clock.time), CLOCK_TIME_BASELINE, clock.colon ? '' : ':');
@@ -175,7 +190,34 @@
       d[i * 4 + 2] = (c & 31) * 255 / 31;
       d[i * 4 + 3] = 255;
     }
-    ctx.putImageData(image, 0, 0);
+    lowCtx.putImageData(image, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(low, 0, 0, SW * SCALE, SH * SCALE);
+    if (layout === CLOCK && robotoReady && fonts.time) {
+      const clock = clockRow(state);
+      smoothText(fonts.date, ROBOTO.date, clock.day, CLOCK_TEXT_X, CLOCK_DATE1_BASELINE);
+      smoothText(fonts.date, ROBOTO.date, clock.date, CLOCK_TEXT_X, CLOCK_DATE2_BASELINE);
+      smoothText(fonts.time, ROBOTO.time, clock.time, SW - CLOCK_TEXT_X - textWidth(fonts.time, clock.time),
+        CLOCK_TIME_BASELINE, clock.colon ? '' : ':');
+    }
+  }
+
+  /**
+   * The board's text, drawn with the font itself: each character at the board's pen position (its
+   * rounded advances), on its baseline, in the same grey (CLOCK_TEXT_LEVEL), so it lines up exactly.
+   */
+  function smoothText(font, size, text, x, y, skip) {
+    const v = CLOCK_TEXT_LEVEL * 255 >> 8;
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.font = `700 ${size * SCALE}px Roboto`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    for (const ch of text) {
+      const g = font.glyphs[ch];
+      if (!g) continue;
+      if (ch !== skip) ctx.fillText(ch, x * SCALE, y * SCALE);
+      x += g[4];
+    }
   }
 
   // ---------- keeping up with the board ----------
@@ -238,15 +280,27 @@
   page.onCustomPicture = remember;
   page.onCustomDeleted = (name) => { delete customs[name]; keep(); };
 
-  // As wide as the custom status preview further down, keeping the screen's shape.
+  // As wide as the custom status preview further down, keeping the screen's shape. While that
+  // section is folded the preview has no width, so use the last one seen.
   const custom = document.querySelector('#preview');
+  const WIDTH_KEY = 'busy-c6-preview-width';
+  let lastWidth = 465;
+  try { lastWidth = Number(localStorage.getItem(WIDTH_KEY)) || lastWidth; } catch {}
   function fit() {
-    const w = custom.getBoundingClientRect().width;
-    if (!w) return;
+    let w = custom.getBoundingClientRect().width;
+    if (w) {
+      lastWidth = w;
+      try { localStorage.setItem(WIDTH_KEY, String(w)); } catch {}
+    } else {
+      w = Math.min(lastWidth, document.querySelector('.top').clientWidth);
+    }
     const border = parseFloat(getComputedStyle(canvas).borderTopWidth) * 2;
     canvas.style.width = `${w}px`;
+    // The view buttons below it take the same width.
+    document.querySelector('.top').style.setProperty('--preview-w', `${w}px`);
     canvas.style.height = `${(w - border) * SH / SW + border}px`;
   }
   new ResizeObserver(fit).observe(custom);
+  new ResizeObserver(fit).observe(document.querySelector('.top'));
   page.onRender(() => { update(); fit(); });
 })();

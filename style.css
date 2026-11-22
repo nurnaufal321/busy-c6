@@ -34,16 +34,17 @@ a { color: var(--link); }
 .sub { color: var(--text-2); font-size: 14px; line-height: 1.5; }
 
 /* ---------- header ---------- */
-.top { padding-top: 40px; padding-bottom: 24px; display: flex; align-items: stretch; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
-/* The title and tagline at the top, the view buttons level with the preview's bottom edge. */
-.intro { flex: 1; min-width: 260px; display: flex; flex-direction: column; }
-.top .intro .tagline span { display: inline; }
-.view-control { margin-top: auto; padding-top: 24px; }
+/* The header, centred: title and tagline, the live preview, then the view buttons, as wide as it. */
+.top { padding-top: 40px; padding-bottom: 24px; display: flex; flex-direction: column; align-items: center; gap: 24px; text-align: center; }
+.intro { max-width: 640px; }
+.top .tagline span { display: block; }
+.live-wrap { margin: 0; max-width: 100%; }
+.live-wrap[hidden] { display: none; }
+.live-wrap .live { margin: 0 auto; }
+.live-label { justify-content: center; }
+.view-control { width: var(--preview-w, 465px); max-width: 100%; }
 .view-hint { font: 13px/1 var(--mono); text-transform: none; letter-spacing: 0; color: var(--text-2); margin-left: 8px; }
 .grid.view-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-/* live.js sizes the preview to the height of the title and tagline beside it. */
-.live-wrap { margin: 0; }
-.live-wrap[hidden] { display: none; }
 .live-label {
   display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
   font: 12px/1 var(--head); text-transform: uppercase; letter-spacing: 1px; color: var(--error);
@@ -129,7 +130,7 @@ button:disabled, button:disabled:hover {
 /* ---------- connection ---------- */
 .conn { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .conn-text { flex: 1; min-width: 200px; }
-.live { display: block; width: 320px; max-width: 100%; height: auto; background: var(--black); border: var(--thick) solid var(--black); border-radius: 12px; image-rendering: pixelated; }
+.live { display: block; width: 320px; max-width: 100%; height: auto; background: var(--black); border: var(--thick) solid var(--black); border-radius: 12px; }
 .live[hidden] { display: none; }
 .conn .title { font: 600 22px/1.2 var(--body); margin-bottom: 8px; }
 
@@ -248,6 +249,15 @@ a.chip.warn:hover { background: var(--warning); color: var(--white); }
 .advanced { margin-top: 16px; }
 .advanced summary { cursor: pointer; font: 14px/1.2 var(--head); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
 .advanced .sub { margin-bottom: 12px; }
+
+/* ---------- folding cards ---------- */
+/* Custom status and Firmware open and close like the activity log. */
+.fold > summary { cursor: pointer; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary h2::before { content: "+ "; }
+.fold[open] > summary h2::before { content: "− "; }
+.fold > summary:hover h2 { text-decoration: underline; }
+.fold:not([open]) > summary.head { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
 
 /* ---------- log ---------- */
 .log { border-top: var(--thick) solid var(--black); margin-bottom: 40px; }

@@ -8,7 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='9' width='28' height='14' fill='%23000'/%3E%3Crect x='6' y='13' width='20' height='6' fill='%23f00'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono&family=Work+Sans:wght@400;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Roboto:wght@700&family=Space+Mono&family=Work+Sans:wght@400;600&display=swap">
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#000000">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -19,15 +19,15 @@
     <div class="intro">
       <h1>BUSY C6</h1>
       <p class="tagline"><span>A status light for your desk, on a Waveshare ESP32-C6 touch display.</span> <span>Plug in the cable. Connect. Set the clock and status.</span></p>
-      <div class="view-control">
-        <p class="label">View <span class="view-hint">Or tap the board</span></p>
-        <div id="views" class="grid view-grid"></div>
-      </div>
     </div>
     <figure id="live-wrap" class="live-wrap" hidden>
       <figcaption class="live-label"><span class="live-dot"></span>Live</figcaption>
-      <canvas id="live" class="live" width="320" height="170"></canvas>
+      <canvas id="live" class="live" width="960" height="510"></canvas>
     </figure>
+    <div class="view-control">
+      <p class="label">View <span class="view-hint">Or tap the board</span></p>
+      <div id="views" class="grid view-grid"></div>
+    </div>
   </header>
 
   <main>
@@ -54,8 +54,8 @@
       <div id="statuses" class="grid"></div>
     </section>
 
-    <section class="card">
-      <div class="head"><h2>Custom status</h2><span class="meta">Saved on the board, up to 8</span></div>
+    <details class="card fold" id="custom-card">
+      <summary class="head"><h2>Custom status</h2><span class="meta">Saved on the board, up to 8</span></summary>
       <div class="custom">
         <div class="fields">
           <label class="field"><span class="label">Line 1</span><input type="text" id="line1" value="BACK AT 3" maxlength="24" autocomplete="off"></label>
@@ -74,10 +74,10 @@
           </div>
         </div>
       </div>
-    </section>
+    </details>
 
-    <section class="card" id="firmware">
-      <div class="head"><h2>Firmware</h2><span id="fw-meta" class="meta">Updates over the USB cable</span></div>
+    <details class="card fold" id="firmware">
+      <summary class="head"><h2>Firmware</h2><span id="fw-meta" class="meta">Updates over the USB cable</span></summary>
       <p id="fw-summary" class="sub">Checking for firmware…</p>
       <ul id="fw-notes" class="notes" hidden></ul>
       <progress id="fw-progress" class="progress" max="1" value="0" hidden></progress>
@@ -91,7 +91,7 @@
           If the page can't find the board, hold <b>BOOT</b>, tap <b>RESET</b>, let go of <b>BOOT</b>, then press Full install and pick its port.</p>
         <div class="actions"><button id="fw-full" disabled>Full install</button></div>
       </details>
-    </section>
+    </details>
 
     <details class="log">
       <summary>Activity log</summary>
